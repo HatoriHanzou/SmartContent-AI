@@ -1,4 +1,21 @@
 document.addEventListener("DOMContentLoaded", () => {
+    // ==== HÀM LOADING CHO NÚT (THÊM MỚI) ====
+    const setButtonLoading = (button, isLoading) => {
+        if (!button) return;
+        if (isLoading) {
+            if (!button.dataset.originalHtml) {
+                button.dataset.originalHtml = button.innerHTML;
+            }
+            button.disabled = true;
+            button.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i>Đang xử lý...`;
+        } else {
+            if (button.dataset.originalHtml) {
+                button.innerHTML = button.dataset.originalHtml;
+                delete button.dataset.originalHtml;
+            }
+            button.disabled = false;
+        }
+    };
     // --- DOM Elements ---
     const profileForm = document.getElementById("profile-form");
     const passwordForm = document.getElementById("password-form");
@@ -11,6 +28,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const currentPasswordInput = document.getElementById("current-password");
     const newPasswordInput = document.getElementById("new-password");
     const confirmPasswordInput = document.getElementById("confirm-password");
+    const wpSitesList = document.getElementById("wp-sites-list");
+    const wordpressForm = document.getElementById("wordpress-form");
+    const saveWpBtn = document.getElementById("save-wp-btn");
+    const wpSiteUrlInput = document.getElementById("wp-site-url");
+    const wpUsernameInput = document.getElementById("wp-username");
+    const wpAppPasswordInput = document.getElementById("wp-app-password");
 
     // Lấy thông tin user hiện tại (chỉ dùng để check quyền admin cho ô email)
     const userString = localStorage.getItem("currentUser");
@@ -34,6 +57,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             populateProfileData(data.profile);
             populateLicenseData(data.license);
+            populateWordPressData(data.wordpress);
         } catch (error) {
             // Lỗi đã được xử lý (alert và/hoặc logout) trong authenticatedFetch
             console.error("settings.js: Lỗi cuối cùng khi tải cài đặt:", error);
@@ -107,6 +131,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Hàm cập nhật profile (dùng authenticatedFetch)
     const handleUpdateProfile = async (payload) => {
+        const btn = profileForm.querySelector('button[type="submit"]'); // Tìm nút submit
+        setButtonLoading(btn, true);
         try {
             // Kiểm tra authenticatedFetch tồn tại
             if (typeof authenticatedFetch !== "function") throw new Error("Lỗi cấu hình (authenticatedFetch missing).");
@@ -139,11 +165,15 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error("Lỗi cập nhật profile:", error);
             // Không cần alert lại ở đây nếu đã alert trong authenticatedFetch
             return false; // Thất bại
+        } finally {
+            setButtonLoading(btn, false);
         }
     };
 
     // Hàm cập nhật mật khẩu (dùng authenticatedFetch)
     const handleUpdatePassword = async (payload) => {
+        const btn = passwordForm.querySelector('button[type="submit"]'); // Tìm nút submit
+        setButtonLoading(btn, true);
         try {
             // Kiểm tra authenticatedFetch tồn tại
             if (typeof authenticatedFetch !== "function") throw new Error("Lỗi cấu hình (authenticatedFetch missing).");
@@ -157,6 +187,8 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (error) {
             console.error("Lỗi cập nhật mật khẩu:", error);
             return false; // Thất bại
+        } finally {
+            setButtonLoading(btn, false); // <-- TẮT LOADING
         }
     };
 
@@ -266,6 +298,96 @@ document.addEventListener("DOMContentLoaded", () => {
         // setActiveProvider(savedProvider);
         setActiveProvider("gemini"); // Hoặc mặc định luôn là gemini
     }
+
+    // --- START: WORDPRESS LOGIC (THÊM MỚI) ---
+    const populateWordPressData = (sites) => {
+        if (!wpSitesList) return;
+        wpSitesList.innerHTML = "";
+        if (!sites || sites.length === 0) {
+            wpSitesList.innerHTML = `<p class="text-gray-400">Chưa có kết nối nào.</p>`;
+            return;
+        }
+
+        sites.forEach((site) => {
+            wpSitesList.insertAdjacentHTML(
+                "beforeend",
+                `
+                <div classm="bg-slate-700/50 p-4 rounded-lg flex justify-between items-center border border-slate-700">
+                    <div>
+                        <p class="font-semibold text-white">${site.site_url}</p>
+                        <p class="text-sm text-gray-300">Username: ${site.wp_username}</p>
+                    </div>
+                    <button data-id="${site.id}" class="delete-wp-btn text-gray-400 hover:text-red-400 p-2">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>
+            `
+            );
+        });
+    };
+
+    if (wordpressForm) {
+        wordpressForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const payload = {
+                site_url: wpSiteUrlInput.value.trim(),
+                wp_username: wpUsernameInput.value.trim(),
+                wp_app_password: wpAppPasswordInput.value.trim(),
+            };
+
+            if (!payload.site_url || !payload.wp_username || !payload.wp_app_password) {
+                alert("Vui lòng điền đầy đủ thông tin kết nối.");
+                return;
+            }
+
+            setButtonLoading(saveWpBtn, true);
+            try {
+                const result = await authenticatedFetch(`/smartcontent-app/api/settings.php`, {
+                    method: "POST",
+                    body: JSON.stringify({ action: "add_wp_site", ...payload }),
+                });
+                alert(result.message);
+                if (result.success) {
+                    await fetchSettings(); // Tải lại toàn bộ cài đặt (bao gồm danh sách site mới)
+                    wordpressForm.reset(); // Xóa form
+                }
+            } catch (error) {
+                console.error("Lỗi khi lưu WP Site:", error);
+                // Alert đã được xử lý trong authenticatedFetch
+            } finally {
+                setButtonLoading(saveWpBtn, false);
+            }
+        });
+    }
+
+    if (wpSitesList) {
+        wpSitesList.addEventListener("click", async (e) => {
+            const deleteBtn = e.target.closest(".delete-wp-btn");
+            if (!deleteBtn) return;
+
+            const siteId = deleteBtn.dataset.id;
+            if (!confirm("Bạn có chắc muốn xóa kết nối website này?")) return;
+
+            setButtonLoading(deleteBtn, true);
+            try {
+                const result = await authenticatedFetch(`/smartcontent-app/api/settings.php`, {
+                    method: "POST",
+                    body: JSON.stringify({ action: "delete_wp_site", id: siteId }),
+                });
+                alert(result.message);
+                if (result.success) {
+                    await fetchSettings(); // Tải lại danh sách
+                }
+            } catch (error) {
+                console.error("Lỗi khi xóa WP Site:", error);
+            } finally {
+                // Nút bị xóa khỏi DOM nên không cần set loading false
+                // Nếu không thành công, chúng ta cũng nên tắt
+                setButtonLoading(deleteBtn, false);
+            }
+        });
+    }
+    // --- END: WORDPRESS LOGIC ---
 
     // --- Initial Load ---
     // Đảm bảo authenticatedFetch sẵn sàng trước khi gọi

@@ -9,6 +9,71 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php'; // Sử dụng hàm authenticate_user()
 
+// --- START: WP ENCRYPTION HELPERS ---
+define('WP_ENCRYPT_CIPHER', 'AES-256-CBC'); 
+
+function encrypt_wp_pass($password) {
+    if (!defined('JWT_SECRET')) {
+        throw new Exception("JWT_SECRET is not defined in config.php");
+    }
+    $key = JWT_SECRET; // Tái sử dụng secret key
+    $ivlen = openssl_cipher_iv_length(WP_ENCRYPT_CIPHER);
+    $iv = openssl_random_pseudo_bytes($ivlen);
+    $ciphertext = openssl_encrypt($password, WP_ENCRYPT_CIPHER, $key, OPENSSL_RAW_DATA, $iv);
+    // Kết hợp IV (vector khởi tạo) với mật mã để giải mã sau này
+    return base64_encode($iv . $ciphertext); 
+}
+// --- END: WP ENCRYPTION HELPERS ---
+
+// --- START: WP VALIDATION HELPER ---
+function validate_wp_credentials($site_url, $username, $app_password) {
+    // Rtrim để xóa dấu / cuối (nếu có) và thêm endpoint
+    $api_url = rtrim($site_url, '/') . '/wp-json/wp/v2/users/me';
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $api_url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15); // Tăng timeout lên 15 giây
+    curl_setopt($ch, CURLOPT_USERAGENT, 'SmartContentAI-Validator');
+    
+    // Xác thực Basic Auth (Mật khẩu ứng dụng dùng cái này)
+    curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+    curl_setopt($ch, CURLOPT_USERPWD, "$username:$app_password");
+
+    // Xử lý SSL (Cần thiết cho nhiều môi trường shared host)
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+
+    $response_body = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curl_error = curl_error($ch);
+    curl_close($ch);
+
+    if ($curl_error) {
+        return ['success' => false, 'message' => "Lỗi kết nối (cURL): " . $curl_error . ". Vui lòng kiểm tra lại URL."];
+    }
+
+    if ($http_code === 200) {
+        $data = json_decode($response_body);
+        if ($data && isset($data->id)) {
+            // Thành công, API trả về thông tin user
+            return ['success' => true];
+        }
+        return ['success' => false, 'message' => "Kết nối thành công nhưng phản hồi không hợp lệ."];
+    }
+
+    if ($http_code === 401 || $http_code === 403) {
+        return ['success' => false, 'message' => "Xác thực thất bại (Lỗi $http_code). Sai Tên người dùng hoặc Mật khẩu ứng dụng."];
+    }
+    
+    if ($http_code === 404) {
+         return ['success' => false, 'message' => "Lỗi 404. Endpoint API không tồn tại. URL có thể sai hoặc REST API/Mật khẩu ứng dụng chưa được bật."];
+    }
+
+    return ['success' => false, 'message' => "Lỗi không xác định từ máy chủ WordPress (Lỗi $http_code)."];
+}
+// --- END: WP VALIDATION HELPER ---
+
 try {
     // SỬA LỖI QUAN TRỌNG: Lấy đúng user_data từ token đã giải mã
     $user_data = authenticate_user(); // Hàm này trả về object data từ token
@@ -41,6 +106,12 @@ try {
             break;
         case 'update_password':
             update_password($conn, $user_id, $data);
+            break;            
+        case 'add_wp_site':
+            add_wp_site($conn, $user_id, $data);
+            break;
+        case 'delete_wp_site':
+            delete_wp_site($conn, $user_id, $data);
             break;
         default:
             echo json_encode(['success' => false, 'message' => 'Hành động không hợp lệ.']);
@@ -57,8 +128,7 @@ try {
 
 // Hàm lấy tất cả cài đặt
 function get_all_settings($conn, $user_id) {
-    $response = ['success' => true, 'profile' => null, 'license' => null];
-
+    $response = ['success' => true, 'profile' => null, 'license' => null, 'wordpress' => []];
     try {
         // Lấy thông tin cá nhân
         $stmt_profile = $conn->prepare("SELECT name, email, phone FROM users WHERE id = ?");
@@ -82,8 +152,21 @@ function get_all_settings($conn, $user_id) {
     }
 
     try {
-        // SỬA LỖI DATABASE: Dùng LEFT JOIN
-        // Để query vẫn chạy ngay cả khi user chưa có license, hoặc thiếu bảng 'plans'
+        // Lấy danh sách WP Sites (Không lấy mật khẩu)
+        $stmt_wp = $conn->prepare("SELECT id, site_url, wp_username FROM wordpress_sites WHERE user_id = ?");
+        $stmt_wp->bind_param("i", $user_id);
+        $stmt_wp->execute();
+        $result_wp = $stmt_wp->get_result();
+        while ($row = $result_wp->fetch_assoc()) {
+            $response['wordpress'][] = $row;
+        }
+        $stmt_wp->close();
+    } catch (Exception $e) {
+        // Không làm hỏng toàn bộ request nếu lỗi
+        error_log("Lỗi khi lấy WP Sites: " . $e->getMessage());
+    }
+
+    try {        
         $stmt_license = $conn->prepare("
             SELECT l.license_key, l.status, l.expires_at, p.name as plan_name 
             FROM licenses l 
@@ -195,6 +278,93 @@ function update_password($conn, $user_id, $data) {
         $stmt->close();
     } else {
         echo json_encode(['success' => false, 'message' => 'Mật khẩu hiện tại không đúng.']);
+    }
+}
+
+// --- CÁC HÀM MỚI CHO WORDPRESS ---
+
+function add_wp_site($conn, $user_id, $data) {
+    if (!isset($data->site_url) || !isset($data->wp_username) || !isset($data->wp_app_password) || 
+        empty($data->site_url) || empty($data->wp_username) || empty($data->wp_app_password)) {
+        echo json_encode(['success' => false, 'message' => 'Vui lòng điền đầy đủ thông tin WordPress.']);
+        return;
+    }
+
+    $site_url = trim($data->site_url);
+    $wp_username = trim($data->wp_username);
+    $raw_password = trim($data->wp_app_password); // Lấy mật khẩu gốc
+
+    if (!filter_var($site_url, FILTER_VALIDATE_URL)) {
+        echo json_encode(['success' => false, 'message' => 'URL Website không hợp lệ.']);
+        return;
+    }
+    
+    // --- BƯỚC XÁC THỰC MỚI ---
+    try {
+        $validation_result = validate_wp_credentials($site_url, $wp_username, $raw_password);
+        if (!$validation_result['success']) {
+            // Trả về lỗi xác thực chi tiết cho client
+            echo json_encode(['success' => false, 'message' => $validation_result['message']]);
+            return;
+        }
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'Lỗi hệ thống khi xác thực: ' . $e->getMessage()]);
+        return;
+    }
+    // --- KẾT THÚC BƯỚC XÁC THỰC ---
+    
+    // Nếu xác thực thành công, TIẾP TỤC LƯU
+    try {
+        // Mã hóa mật khẩu
+        $encrypted_pass = encrypt_wp_pass($raw_password);
+
+        // Tạm thời: Xóa kết nối cũ để thêm kết nối mới (chỉ cho phép 1 site/user)
+        $stmt_delete = $conn->prepare("DELETE FROM wordpress_sites WHERE user_id = ?");
+        $stmt_delete->bind_param("i", $user_id);
+        $stmt_delete->execute();
+        $stmt_delete->close();
+        
+        // Thêm kết nối mới
+        $stmt = $conn->prepare("INSERT INTO wordpress_sites (user_id, site_url, wp_username, wp_application_password) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("isss", $user_id, $site_url, $wp_username, $encrypted_pass);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['success' => true, 'message' => 'Xác thực thành công! Đã lưu kết nối.']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Lỗi khi lưu kết nối (sau khi đã xác thực).']);
+        }
+        $stmt->close();
+
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'Lỗi mã hóa hoặc CSDL: ' . $e->getMessage()]);
+    }
+}
+
+function delete_wp_site($conn, $user_id, $data) {
+    if (!isset($data->id) || empty($data->id)) {
+        echo json_encode(['success' => false, 'message' => 'Thiếu ID của site.']);
+        return;
+    }
+    
+    $site_id = intval($data->id);
+
+    try {
+        // Xóa site, đảm bảo user_id khớp để bảo mật
+        $stmt = $conn->prepare("DELETE FROM wordpress_sites WHERE id = ? AND user_id = ?");
+        $stmt->bind_param("ii", $site_id, $user_id);
+        
+        if ($stmt->execute()) {
+            if ($stmt->affected_rows > 0) {
+                echo json_encode(['success' => true, 'message' => 'Đã xóa kết nối WordPress.']);
+            } else {
+                echo json_encode(['success' => false, 'message' => 'Không tìm thấy kết nối hoặc không có quyền xóa.']);
+            }
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Lỗi khi xóa kết nối.']);
+        }
+        $stmt->close();
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'Lỗi CSDL: ' . $e->getMessage()]);
     }
 }
 ?>
