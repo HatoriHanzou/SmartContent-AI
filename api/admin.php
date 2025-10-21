@@ -257,7 +257,84 @@ if ($action === "delete_license") {
 }
 
 /* ========================================================================
-   7. HÀNH ĐỘNG KHÔNG HỢP LỆ
+   7. THÊM GÓI CƯỚC (PLAN)
+========================================================================= */
+if ($action === "add_plan") {
+    $name = trim($input['name'] ?? '');
+    $type = trim($input['type'] ?? 'Tháng');
+    $price = floatval($input['price'] ?? 0);
+    $limit = intval($input['article_limit'] ?? 0);
+
+    if (empty($name)) {
+        echo json_encode(["success" => false, "message" => "Tên gói không được để trống."]);
+        exit;
+    }
+
+    try {
+        // Các cột 'feature' sẽ tự động lấy giá trị DEFAULT từ CSDL
+        $stmt = $conn->prepare("INSERT INTO plans (name, type, price, article_limit) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("ssdi", $name, $type, $price, $limit);
+        $ok = $stmt->execute();
+        $stmt->close();
+        echo json_encode(["success" => $ok, "message" => $ok ? "Tạo gói cước thành công." : "Tạo thất bại."]);
+    } catch (Exception $e) {
+        echo json_encode(["success" => false, "message" => $e->getMessage()]);
+    }
+    exit;
+}
+
+/* ========================================================================
+   8. CẬP NHẬT GÓI CƯỚC (PLAN)
+========================================================================= */
+if ($action === "update_plan") {
+    $id = intval($input['id'] ?? 0);
+    $name = trim($input['name'] ?? '');
+    $type = trim($input['type'] ?? 'Tháng');
+    $price = floatval($input['price'] ?? 0);
+    $limit = intval($input['article_limit'] ?? 0);
+
+    if (empty($name) || !$id) {
+        echo json_encode(["success" => false, "message" => "Thiếu ID hoặc Tên gói."]);
+        exit;
+    }
+
+    try {
+        $stmt = $conn->prepare("UPDATE plans SET name=?, type=?, price=?, article_limit=? WHERE id=?");
+        $stmt->bind_param("ssdii", $name, $type, $price, $limit, $id);
+        $ok = $stmt->execute();
+        $stmt->close();
+        echo json_encode(["success" => $ok, "message" => $ok ? "Cập nhật gói cước thành công." : "Cập nhật thất bại."]);
+    } catch (Exception $e) {
+        echo json_encode(["success" => false, "message" => $e->getMessage()]);
+    }
+    exit;
+}
+
+/* ========================================================================
+   9. XÓA GÓI CƯỚC (PLAN)
+========================================================================= */
+if ($action === "delete_plan") {
+    $id = intval($input['id'] ?? 0);
+    if (!$id) {
+        echo json_encode(["success" => false, "message" => "Thiếu ID gói cước."]);
+        exit;
+    }
+    try {
+        $stmt = $conn->prepare("DELETE FROM plans WHERE id=?");
+        $stmt->bind_param("i", $id);
+        $ok = $stmt->execute();
+        $stmt->close();
+        echo json_encode(["success" => $ok, "message" => $ok ? "Xóa gói cước thành công." : "Xóa thất bại."]);
+    } catch (Exception $e) {
+        // Xử lý lỗi nếu không xóa được (ví dụ: do license đang dùng)
+        $msg = $e->getCode() == 1451 ? "Không thể xóa gói (có license đang sử dụng)." : $e->getMessage();
+        echo json_encode(["success" => false, "message" => $msg]);
+    }
+    exit;
+}
+
+/* ========================================================================
+   10. HÀNH ĐỘNG KHÔNG HỢP LỆ
 ========================================================================= */
 echo json_encode(["success" => false, "message" => "Hành động không hợp lệ hoặc chưa được hỗ trợ."]);
 exit;

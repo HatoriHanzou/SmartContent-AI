@@ -4,6 +4,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let adminData = { plans: [], licenses: [], users: [] };
     let editingUser = null;
+    let editingPlan = null;
 
     // ==== DOM ELEMENTS ====
     const plansTableBody = document.getElementById("plans-table-body");
@@ -16,6 +17,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const userSearchInput = document.getElementById("user-search-input");
     const modalOverlay = document.getElementById("modal-overlay");
     const addUserModal = document.getElementById("add-user-modal");
+    const planModal = document.getElementById("plan-modal");
+    const planForm = document.getElementById("plan-form");
+    const addPlanBtn = document.getElementById("add-plan-btn");
+    const savePlanBtn = document.getElementById("save-plan-btn");
 
     // ==== TOAST ====
     const showToast = (message, type = "info") => {
@@ -325,8 +330,10 @@ document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll(".modal-close-btn").forEach((btn) =>
         btn.addEventListener("click", () => {
             addUserModal.classList.add("hidden");
+            planModal.classList.add("hidden"); // <-- THÊM DÒNG NÀY
             modalOverlay.classList.add("hidden");
             editingUser = null;
+            editingPlan = null; // <-- THÊM DÒNG NÀY
             document.getElementById("user-password-field").classList.remove("hidden");
         })
     );
@@ -380,6 +387,100 @@ document.addEventListener("DOMContentLoaded", () => {
             } else showToast("❌ " + data.message, "error");
         } catch (err) {
             showToast("❌ Lỗi khi xóa người dùng.", "error");
+        }
+    }
+
+    // ==== ADD PLAN ====
+    addPlanBtn?.addEventListener("click", () => {
+        editingPlan = null;
+        planForm?.reset();
+        document.getElementById("plan-modal-title").textContent = "Thêm Gói cước";
+        planModal.classList.remove("hidden");
+        modalOverlay.classList.remove("hidden");
+    });
+
+    // ==== EDIT/DELETE PLAN LISTENER ====
+    plansTableBody?.addEventListener("click", (e) => {
+        // 1. Check nút SỬA
+        const editBtn = e.target.closest(".edit-plan-btn");
+        if (editBtn) {
+            const planId = editBtn.closest("tr")?.dataset?.id;
+            const plan = adminData.plans.find((p) => p.id == planId);
+            if (!plan) return showToast("Không tìm thấy gói cước.", "error");
+
+            editingPlan = plan;
+            document.getElementById("plan-modal-title").textContent = "Chỉnh sửa Gói cước";
+            document.getElementById("plan-name").value = plan.name;
+            document.getElementById("plan-type").value = plan.type;
+            document.getElementById("plan-price").value = plan.price;
+            document.getElementById("plan-limit").value = plan.article_limit;
+
+            planModal.classList.remove("hidden");
+            modalOverlay.classList.remove("hidden");
+            return;
+        }
+
+        // 2. Check nút XÓA
+        const deleteBtn = e.target.closest(".delete-plan-btn");
+        if (deleteBtn) {
+            const planId = deleteBtn.closest("tr")?.dataset?.id;
+            const plan = adminData.plans.find((p) => p.id == planId);
+            const confirmMsg = plan ? `Bạn có chắc muốn xóa gói "${plan.name}"?` : "Bạn có chắc muốn xóa gói này?";
+
+            if (planId && confirm(confirmMsg)) {
+                handleDeletePlan(planId);
+            }
+        }
+    });
+
+    // ==== SAVE PLAN (ADD/EDIT) ====
+    savePlanBtn?.addEventListener("click", async (e) => {
+        e.preventDefault();
+        const payload = {
+            action: editingPlan ? "update_plan" : "add_plan",
+            id: editingPlan?.id || null,
+            name: document.getElementById("plan-name").value.trim(),
+            type: document.getElementById("plan-type").value.trim(),
+            price: document.getElementById("plan-price").value.trim(),
+            article_limit: document.getElementById("plan-limit").value.trim(),
+        };
+        if (!payload.name || !payload.price || !payload.article_limit) {
+            return showToast("⚠️ Vui lòng nhập đầy đủ thông tin.", "warning");
+        }
+
+        try {
+            const res = await fetch("/smartcontent-app/api/admin.php", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast("✅ " + data.message, "success");
+                planModal.classList.add("hidden");
+                modalOverlay.classList.add("hidden");
+                await loadAdminData();
+            } else showToast("❌ " + data.message, "error");
+        } catch {
+            showToast("❌ Lỗi khi lưu gói cước.", "error");
+        }
+    });
+
+    // ==== DELETE PLAN (FUNCTION) ====
+    async function handleDeletePlan(id) {
+        try {
+            const res = await fetch("/smartcontent-app/api/admin.php", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "delete_plan", id }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast("🗑️ " + data.message, "success");
+                await loadAdminData();
+            } else showToast("❌ " + data.message, "error");
+        } catch (err) {
+            showToast("❌ Lỗi khi xóa gói cước.", "error");
         }
     }
 
