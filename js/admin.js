@@ -21,6 +21,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const planForm = document.getElementById("plan-form");
     const addPlanBtn = document.getElementById("add-plan-btn");
     const savePlanBtn = document.getElementById("save-plan-btn");
+    const createLicenseBtn = document.getElementById("create-license-btn");
 
     // ==== TOAST ====
     const showToast = (message, type = "info") => {
@@ -41,6 +42,28 @@ document.addEventListener("DOMContentLoaded", () => {
             toast.style.opacity = "0";
             setTimeout(() => toast.remove(), 500);
         }, 3000);
+    };
+
+    // ==== SET BUTTON LOADING  ====
+    const setButtonLoading = (button, isLoading) => {
+        if (!button) return;
+        if (isLoading) {
+            // Lưu nội dung HTML gốc của nút (bao gồm cả icon)
+            if (!button.dataset.originalHtml) {
+                button.dataset.originalHtml = button.innerHTML;
+            }
+            button.disabled = true;
+            // Hiển thị icon spinner
+            button.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i>Đang xử lý...`;
+        } else {
+            // Khôi phục nội dung HTML gốc
+            if (button.dataset.originalHtml) {
+                button.innerHTML = button.dataset.originalHtml;
+                // Xóa attribute để sẵn sàng cho lần nhấp tiếp theo
+                delete button.dataset.originalHtml;
+            }
+            button.disabled = false;
+        }
     };
 
     // ==== LOAD DATA ====
@@ -218,12 +241,13 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     // ==== CREATE LICENSE ====
-    document.getElementById("create-license-btn")?.addEventListener("click", async () => {
+    createLicenseBtn?.addEventListener("click", async () => {
         const planSelect = document.getElementById("plan-for-license");
         if (!planSelect.value) return showToast("Vui lòng chọn gói cước trước khi tạo License.", "warning");
-        const payload = { action: "add_license", plan_id: planSelect.value, key: generateLicenseKey() };
 
+        setButtonLoading(createLicenseBtn, true); // <-- BẬT LOADING
         try {
+            const payload = { action: "add_license", plan_id: planSelect.value, key: generateLicenseKey() };
             const res = await fetch("/smartcontent-app/api/admin.php", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -236,6 +260,8 @@ document.addEventListener("DOMContentLoaded", () => {
             } else showToast("❌ " + data.message, "error");
         } catch {
             showToast("❌ Lỗi khi tạo License.", "error");
+        } finally {
+            setButtonLoading(createLicenseBtn, false); // <-- TẮT LOADING
         }
     });
 
@@ -245,6 +271,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!btn) return;
         const id = btn.closest("tr")?.dataset?.id;
         if (!confirm("Bạn có chắc muốn xóa License này?")) return;
+
+        setButtonLoading(btn, true); // <-- BẬT LOADING
         try {
             const res = await fetch("/smartcontent-app/api/admin.php", {
                 method: "POST",
@@ -258,6 +286,8 @@ document.addEventListener("DOMContentLoaded", () => {
             } else showToast("❌ " + data.message, "error");
         } catch {
             showToast("❌ Lỗi khi xóa License.", "error");
+        } finally {
+            setButtonLoading(btn, false); // <-- TẮT LOADING
         }
     });
 
@@ -320,7 +350,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 : "Bạn có chắc muốn xóa người dùng này?";
 
             if (userId && confirm(confirmMsg)) {
-                handleDeleteUser(userId); // Gọi hàm xóa đã tồn tại ở cuối file
+                handleDeleteUser(userId, deleteBtn);
             }
             return; // Dừng lại sau khi xử lý "delete"
         }
@@ -341,8 +371,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==== SAVE USER ====
     document.getElementById("save-user-btn")?.addEventListener("click", async (e) => {
         e.preventDefault();
+        const btn = document.getElementById("save-user-btn");
         const payload = {
-            action: editingUser ? "update_user" : "add_user",
+            /* ... (giữ nguyên payload) ... */ action: editingUser ? "update_user" : "add_user",
             id: editingUser?.id || null,
             name: document.getElementById("user-name").value.trim(),
             email: document.getElementById("user-email").value.trim(),
@@ -354,6 +385,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!payload.name || !payload.email) return showToast("⚠️ Vui lòng nhập đầy đủ thông tin.", "warning");
         if (!editingUser && !payload.password) return showToast("⚠️ Vui lòng nhập mật khẩu.", "warning");
 
+        setButtonLoading(btn, true); // <-- BẬT LOADING
         try {
             const res = await fetch("/smartcontent-app/api/admin.php", {
                 method: "POST",
@@ -369,11 +401,15 @@ document.addEventListener("DOMContentLoaded", () => {
             } else showToast("❌ " + data.message, "error");
         } catch {
             showToast("❌ Lỗi khi lưu người dùng.", "error");
+        } finally {
+            setButtonLoading(btn, false); // <-- TẮT LOADING
         }
     });
 
-    // ==== DELETE USER (HÀM MỚI) ====
-    async function handleDeleteUser(id) {
+    // ==== DELETE USER ====
+    async function handleDeleteUser(id, btn) {
+        // <-- Thêm 'btn'
+        setButtonLoading(btn, true); // <-- BẬT LOADING
         try {
             const res = await fetch("/smartcontent-app/api/admin.php", {
                 method: "POST",
@@ -387,6 +423,8 @@ document.addEventListener("DOMContentLoaded", () => {
             } else showToast("❌ " + data.message, "error");
         } catch (err) {
             showToast("❌ Lỗi khi xóa người dùng.", "error");
+        } finally {
+            setButtonLoading(btn, false); // <-- TẮT LOADING
         }
     }
 
@@ -428,7 +466,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const confirmMsg = plan ? `Bạn có chắc muốn xóa gói "${plan.name}"?` : "Bạn có chắc muốn xóa gói này?";
 
             if (planId && confirm(confirmMsg)) {
-                handleDeletePlan(planId);
+                handleDeletePlan(planId, deleteBtn);
             }
         }
     });
@@ -448,6 +486,7 @@ document.addEventListener("DOMContentLoaded", () => {
             return showToast("⚠️ Vui lòng nhập đầy đủ thông tin.", "warning");
         }
 
+        setButtonLoading(savePlanBtn, true); // <-- BẬT LOADING
         try {
             const res = await fetch("/smartcontent-app/api/admin.php", {
                 method: "POST",
@@ -463,11 +502,15 @@ document.addEventListener("DOMContentLoaded", () => {
             } else showToast("❌ " + data.message, "error");
         } catch {
             showToast("❌ Lỗi khi lưu gói cước.", "error");
+        } finally {
+            setButtonLoading(savePlanBtn, false); // <-- TẮT LOADING
         }
     });
 
     // ==== DELETE PLAN (FUNCTION) ====
-    async function handleDeletePlan(id) {
+    async function handleDeletePlan(id, btn) {
+        // <-- Thêm 'btn'
+        setButtonLoading(btn, true); // <-- BẬT LOADING
         try {
             const res = await fetch("/smartcontent-app/api/admin.php", {
                 method: "POST",
@@ -481,6 +524,8 @@ document.addEventListener("DOMContentLoaded", () => {
             } else showToast("❌ " + data.message, "error");
         } catch (err) {
             showToast("❌ Lỗi khi xóa gói cước.", "error");
+        } finally {
+            setButtonLoading(btn, false); // <-- TẮT LOADING
         }
     }
 
