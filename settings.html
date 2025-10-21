@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="vi">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SmartContent AI - Cài đặt</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="css/style.css" />
+    </head>
+
+    <body>
+        <div class="flex h-screen overflow-hidden">
+            <!-- Sidebar Placeholder -->
+            <div id="sidebar-placeholder"></div>
+
+            <!-- Main Content -->
+            <div class="flex-1 flex flex-col overflow-hidden bg-slate-900">
+                <!-- Header Placeholder -->
+                <div id="header-placeholder"></div>
+
+                <!-- Content Area -->
+                <main class="flex-1 overflow-y-auto p-4 md:p-6">
+                    <div class="max-w-4xl mx-auto">
+                        <!-- Tabs Navigation -->
+                        <div id="settings-tabs" class="border-b border-slate-700 mb-6">
+                            <nav class="flex space-x-2" aria-label="Tabs">
+                                <button
+                                    data-tab="profile"
+                                    class="settings-tab-button px-4 py-2 font-medium text-sm rounded-md text-white bg-slate-700"
+                                >
+                                    Thông tin cá nhân
+                                </button>
+                                <button
+                                    data-tab="ai"
+                                    class="settings-tab-button px-4 py-2 font-medium text-sm rounded-md text-gray-300 hover:text-white hover:bg-slate-700/50"
+                                >
+                                    Nhà cung cấp AI
+                                </button>
+                                <button
+                                    data-tab="wordpress"
+                                    class="settings-tab-button px-4 py-2 font-medium text-sm rounded-md text-gray-300 hover:text-white hover:bg-slate-700/50"
+                                >
+                                    Kết nối WordPress
+                                </button>
+                            </nav>
+                        </div>
+
+                        <!-- Profile Tab Content -->
+                        <div id="profile-tab-content" class="settings-tab-pane space-y-8">
+                            <!-- Nội dung tab Thông tin cá nhân -->
+                            <form id="profile-form" class="bg-slate-800 rounded-xl shadow-lg p-6">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h2 class="text-lg font-semibold text-white">Thông tin của bạn</h2>
+                                    <button
+                                        type="submit"
+                                        class="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition"
+                                    >
+                                        Lưu thay đổi
+                                    </button>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">Tên người dùng</label>
+                                        <input
+                                            id="profile-name"
+                                            type="text"
+                                            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">Email</label>
+                                        <input
+                                            id="profile-email"
+                                            type="email"
+                                            readonly
+                                            class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-gray-400 cursor-not-allowed"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">Số điện thoại</label>
+                                        <input
+                                            id="profile-phone"
+                                            type="tel"
+                                            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">Trạng thái tài khoản</label>
+                                        <div
+                                            id="profile-status"
+                                            class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm flex items-center"
+                                        >
+                                            <!-- Content will be populated by JS -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+
+                            <form id="password-form" class="bg-slate-800 rounded-xl shadow-lg p-6">
+                                <h2 class="text-lg font-semibold text-white mb-4">Đổi mật khẩu</h2>
+                                <div class="space-y-4 max-w-sm">
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">Mật khẩu hiện tại</label>
+                                        <input
+                                            id="current-password"
+                                            type="password"
+                                            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">Mật khẩu mới</label>
+                                        <input
+                                            id="new-password"
+                                            type="password"
+                                            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                            required
+                                            minlength="6"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">Xác nhận mật khẩu mới</label>
+                                        <input
+                                            id="confirm-password"
+                                            type="password"
+                                            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                            required
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        class="px-4 py-2 text-sm font-semibold text-white bg-slate-600 rounded-lg hover:bg-slate-500 transition"
+                                    >
+                                        Đổi mật khẩu
+                                    </button>
+                                </div>
+                            </form>
+
+                            <div class="bg-slate-800 rounded-xl shadow-lg p-6">
+                                <h2 class="text-lg font-semibold text-white mb-4">Lịch sử kích hoạt License</h2>
+                                <div id="license-history" class="text-sm">
+                                    <p class="text-gray-400">Đang tải thông tin license...</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- AI Provider Tab Content -->
+                        <div id="ai-tab-content" class="settings-tab-pane hidden space-y-8">
+                            <form id="ai-settings-form">
+                                <div class="bg-slate-800 rounded-xl shadow-lg p-6">
+                                    <h2 class="text-lg font-semibold text-white mb-4">Chọn nhà cung cấp</h2>
+                                    <div id="ai-provider-container" class="bg-slate-700 rounded-lg p-1 flex space-x-1">
+                                        <button
+                                            type="button"
+                                            data-provider="gemini"
+                                            class="ai-provider-toggle flex-1 py-2 text-sm font-medium rounded-md"
+                                        >
+                                            Google Gemini
+                                        </button>
+                                        <button
+                                            type="button"
+                                            data-provider="openai"
+                                            class="ai-provider-toggle flex-1 py-2 text-sm font-medium rounded-md"
+                                        >
+                                            OpenAI (GPT)
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="gemini-settings" class="hidden">
+                                    <div class="bg-slate-800 rounded-xl shadow-lg p-6">
+                                        <h2 class="text-lg font-semibold text-white mb-4">Cài đặt Gemini</h2>
+                                        <div class="space-y-4">
+                                            <div>
+                                                <label class="block text-sm font-medium mb-1">API Key</label>
+                                                <input
+                                                    id="gemini-api-key"
+                                                    type="text"
+                                                    placeholder="Nhập Gemini API Key của bạn"
+                                                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium mb-1">Model</label>
+                                                <select
+                                                    id="gemini-model"
+                                                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                                >
+                                                    <option value="gemini-1.5-flash">
+                                                        Gemini 1.5 Flash (Nhanh & tiết kiệm)
+                                                    </option>
+                                                    <option value="gemini-1.5-pro">
+                                                        Gemini 1.5 Pro (Mạnh mẽ & thông minh)
+                                                    </option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="openai-settings" class="hidden">
+                                    <div class="bg-slate-800 rounded-xl shadow-lg p-6">
+                                        <h2 class="text-lg font-semibold text-white mb-4">Cài đặt OpenAI API</h2>
+                                        <div class="space-y-4">
+                                            <div>
+                                                <label class="block text-sm font-medium mb-1">API Key</label>
+                                                <input
+                                                    id="openai-api-key"
+                                                    type="text"
+                                                    placeholder="Nhập API Key của bạn (sk-...)"
+                                                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium mb-1">Model</label>
+                                                <select
+                                                    id="openai-model"
+                                                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                                >
+                                                    <option value="gpt-4o">GPT-4o (Mới nhất)</option>
+                                                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Nhanh)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="flex justify-end">
+                                    <button
+                                        type="submit"
+                                        class="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition"
+                                    >
+                                        Lưu Cài đặt AI
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- WordPress Tab Content -->
+                        <div id="wordpress-tab-content" class="settings-tab-pane hidden space-y-6">
+                            <div class="bg-slate-800 rounded-xl shadow-lg p-6">
+                                <h2 class="text-lg font-semibold text-white mb-4">Trang WordPress đã kết nối</h2>
+                                <div id="wp-sites-list" class="space-y-3">
+                                    <!-- Danh sách site sẽ được chèn vào đây bởi JS -->
+                                </div>
+                            </div>
+                            <div class="bg-slate-800 rounded-xl shadow-lg p-6">
+                                <h2 class="text-lg font-semibold text-white mb-4">Thêm kết nối mới</h2>
+                                <form id="wordpress-form" class="space-y-4">
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">URL Website</label>
+                                        <input
+                                            id="wp-site-url"
+                                            type="url"
+                                            placeholder="https://yourwebsite.com"
+                                            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">Tên người dùng WordPress</label>
+                                        <input
+                                            id="wp-username"
+                                            type="text"
+                                            placeholder="Tên người dùng WordPress của bạn"
+                                            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">Mật khẩu ứng dụng</label>
+                                        <input
+                                            id="wp-app-password"
+                                            type="password"
+                                            placeholder="xxxx xxxx xxxx xxxx"
+                                            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        class="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition"
+                                    >
+                                        Lưu kết nối
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+            </div>
+        </div>
+
+        <!-- Scripts -->
+        <script src="js/layout.js?v=2.2" defer></script>
+        <script src="js/script.js?v=2.2" defer></script>
+        <script src="js/settings.js?v=2.2" defer></script>
+    </body>
+</html>

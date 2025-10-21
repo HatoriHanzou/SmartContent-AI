@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="vi">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SmartContent AI - Lịch Nội dung</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="css/style.css" />
+    </head>
+    <body>
+        <div class="flex h-screen overflow-hidden">
+            <!-- Sidebar sẽ được chèn vào đây -->
+            <div id="sidebar-placeholder"></div>
+
+            <!-- Nội dung chính -->
+            <div class="flex-1 flex flex-col overflow-hidden bg-slate-900">
+                <!-- Header sẽ được chèn vào đây -->
+                <div id="header-placeholder"></div>
+
+                <!-- Vùng nội dung -->
+                <main class="flex-1 overflow-y-auto p-4 md:p-6">
+                    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                        <!-- Left Column (40%)-->
+                        <div class="lg:col-span-2 space-y-6">
+                            <div class="bg-slate-800 rounded-xl shadow-lg p-6">
+                                <h2 class="text-lg font-semibold text-white mb-4">Brainstorm Chủ đề</h2>
+                                <div class="space-y-3">
+                                    <input
+                                        type="text"
+                                        placeholder="Nhập chủ đề chính, VD: 'chăm sóc da mụn'"
+                                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                    />
+                                    <button
+                                        class="w-full flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition"
+                                    >
+                                        <i class="fas fa-lightbulb mr-2"></i>Tạo ý tưởng
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="bg-slate-800 rounded-xl shadow-lg p-6 flex flex-col">
+                                <div class="flex justify-between items-center pb-4 mb-4 border-b border-slate-700">
+                                    <h2 class="text-lg font-semibold text-white">Ý tưởng đã tạo (0)</h2>
+                                    <button
+                                        class="px-3 py-1.5 text-xs font-semibold bg-slate-600 rounded-md hover:bg-slate-500 transition"
+                                    >
+                                        Thêm 0 ý tưởng vào kế hoạch
+                                    </button>
+                                </div>
+                                <div class="flex-1 flex items-center justify-center text-center text-gray-500">
+                                    <p>Chưa có ý tưởng nào.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Right Column (60%)-->
+                        <div class="lg:col-span-3 bg-slate-800 rounded-xl shadow-lg p-6 flex flex-col">
+                            <h2 class="text-lg font-semibold text-white pb-4 mb-4 border-b border-slate-700">
+                                Kế hoạch Nội dung (0)
+                            </h2>
+                            <div class="flex-1 flex items-center justify-center text-center text-gray-500">
+                                <p>Kế hoạch của bạn đang trống.</p>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+            </div>
+        </div>
+        <script src="js/layout.js?v=2.2" defer></script>
+        <script src="js/script.js?v=2.2" defer></script>
+    </body>
+</html>

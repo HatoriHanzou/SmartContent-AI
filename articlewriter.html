@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="vi">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SmartContent AI - Viết bài</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="css/style.css" />
+    </head>
+    <body>
+        <div class="flex h-screen overflow-hidden">
+            <!-- Sidebar sẽ được chèn vào đây bởi layout.js -->
+            <div id="sidebar-placeholder"></div>
+
+            <!-- Nội dung chính -->
+            <div class="flex-1 flex flex-col overflow-hidden bg-slate-900">
+                <!-- Header sẽ được chèn vào đây bởi layout.js -->
+                <div id="header-placeholder"></div>
+
+                <!-- Vùng nội dung -->
+                <main class="flex-1 overflow-y-auto p-4 md:p-6">
+                    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                        <!-- Cột trái (40%) -->
+                        <div class="lg:col-span-2 bg-slate-800 rounded-xl shadow-lg p-6">
+                            <!-- Tabs -->
+                            <div id="article-writer-tabs" class="mb-6 border-b border-slate-700">
+                                <nav class="-mb-px flex space-x-4 relative" aria-label="Tabs">
+                                    <button
+                                        data-tab="keyword"
+                                        class="article-writer-tab-button whitespace-nowrap py-3 px-1 font-medium text-sm text-blue-500 active"
+                                    >
+                                        Từ khóa chính
+                                    </button>
+                                    <button
+                                        data-tab="bulk"
+                                        class="article-writer-tab-button whitespace-nowrap py-3 px-1 font-medium text-sm text-gray-400 hover:text-gray-300"
+                                    >
+                                        Viết hàng loạt
+                                    </button>
+                                    <button
+                                        data-tab="url"
+                                        class="article-writer-tab-button whitespace-nowrap py-3 px-1 font-medium text-sm text-gray-400 hover:text-gray-300"
+                                    >
+                                        Viết lại URL
+                                    </button>
+                                    <div
+                                        class="tab-underline absolute bottom-0 h-0.5 bg-blue-500 transition-all duration-300 ease-in-out"
+                                    ></div>
+                                </nav>
+                            </div>
+
+                            <!-- Nội dung Tab -->
+                            <div class="space-y-6">
+                                <div id="keyword-tab-content" class="article-writer-tab-pane">
+                                    <label class="block text-sm font-medium mb-2">Từ khóa chính</label>
+                                    <input
+                                        type="text"
+                                        placeholder="VD: cách viết bài chuẩn SEO"
+                                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2.5 text-sm"
+                                    />
+                                </div>
+                                <div id="bulk-tab-content" class="article-writer-tab-pane hidden">
+                                    <label class="block text-sm font-medium mb-2">Từ khóa (mỗi từ khóa một dòng)</label>
+                                    <textarea
+                                        rows="4"
+                                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2.5 text-sm"
+                                        placeholder="cách viết bài chuẩn SEO&#10;content marketing là gì"
+                                    ></textarea>
+                                </div>
+                                <div id="url-tab-content" class="article-writer-tab-pane hidden">
+                                    <label class="block text-sm font-medium mb-2">URL bài viết cần viết lại</label>
+                                    <input
+                                        type="url"
+                                        placeholder="https://"
+                                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2.5 text-sm"
+                                    />
+                                </div>
+
+                                <!-- Tùy chọn -->
+                                <div class="space-y-5 pt-5 border-t border-slate-700">
+                                    <div>
+                                        <label class="flex items-center space-x-3 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                class="form-checkbox h-5 w-5 bg-slate-700 border-slate-600 rounded text-blue-500 focus:ring-blue-500"
+                                            />
+                                            <span class="text-sm font-medium"
+                                                >Phân tích đối thủ & Tạo dàn ý
+                                                <span class="text-yellow-400 text-xs font-semibold"
+                                                    >(Yêu cầu Gemini)</span
+                                                ></span
+                                            >
+                                        </label>
+                                        <p class="text-sm text-gray-400 pl-8 mt-1">
+                                            Sử dụng Google Search để phân tích top 5 đối thủ và tạo dàn ý chi tiết.
+                                        </p>
+                                    </div>
+
+                                    <div>
+                                        <label class="flex items-center space-x-3 cursor-pointer">
+                                            <input
+                                                id="prompt-toggle"
+                                                type="checkbox"
+                                                class="form-checkbox h-5 w-5 bg-slate-700 border-slate-600 rounded text-blue-500 focus:ring-blue-500"
+                                            />
+                                            <span class="text-sm font-medium">Tùy chỉnh Prompt (Nâng cao)</span>
+                                        </label>
+                                        <div id="prompt-section" class="pl-8 mt-2 space-y-2 hidden">
+                                            <textarea
+                                                rows="3"
+                                                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                                placeholder="Nhập prompt của bạn ở đây..."
+                                            ></textarea>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label class="flex items-center space-x-3 cursor-pointer">
+                                            <input
+                                                id="image-toggle"
+                                                type="checkbox"
+                                                class="form-checkbox h-5 w-5 bg-slate-700 border-slate-600 rounded text-blue-500 focus:ring-blue-500"
+                                            />
+                                            <span class="text-sm font-medium">Tạo hình ảnh</span>
+                                        </label>
+                                        <div id="image-section" class="pl-8 mt-2 grid-cols-2 gap-4 hidden">
+                                            <div class="flex-1 min-w-0">
+                                                <label class="block text-sm font-medium mb-1">Số lượng</label>
+                                                <select
+                                                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                                >
+                                                    <option>1</option>
+                                                    <option>2</option>
+                                                    <option>3</option>
+                                                    <option>4</option>
+                                                </select>
+                                            </div>
+                                            <div class="flex-1 min-w-0">
+                                                <label class="block text-sm font-medium mb-1">Phong cách</label>
+                                                <select
+                                                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm"
+                                                >
+                                                    <option>Ảnh thật</option>
+                                                    <option>Minh họa</option>
+                                                    <option>Vector</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="pt-6">
+                                    <button
+                                        class="w-full flex items-center justify-center px-4 py-3 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition"
+                                    >
+                                        <i class="fas fa-magic mr-2"></i>Tạo bài viết
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Cột phải (60%) -->
+                        <div class="lg:col-span-3 bg-slate-800 rounded-xl shadow-lg p-6 h-full flex flex-col">
+                            <div class="flex flex-wrap gap-2 justify-between items-center mb-4">
+                                <h2 class="text-lg font-semibold text-white">Bài viết đã tạo (0)</h2>
+                            </div>
+                            <div class="flex-1 overflow-x-auto">
+                                <table class="w-full text-sm text-left">
+                                    <thead class="text-xs text-gray-400 uppercase bg-slate-700/50">
+                                        <tr>
+                                            <th class="p-3 w-4">
+                                                <input
+                                                    type="checkbox"
+                                                    class="form-checkbox h-4 w-4 bg-slate-600 border-slate-500 rounded text-blue-500"
+                                                />
+                                            </th>
+                                            <th class="p-3">Tiêu đề</th>
+                                            <th class="p-3">Trạng thái</th>
+                                            <th class="p-3">Số từ</th>
+                                            <th class="p-3">SEO</th>
+                                            <th class="p-3">Hành động</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr class="border-b border-slate-700">
+                                            <td colspan="6" class="text-center py-10 text-gray-500">
+                                                <div class="flex flex-col items-center">
+                                                    <i class="fas fa-file-alt text-4xl text-slate-600 mb-3"></i>
+                                                    <span>Chưa có bài viết nào.</span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+            </div>
+        </div>
+        <!-- Thêm ?v=1.2 để chống lỗi cache của trình duyệt -->
+        <script src="js/layout.js?v=2.2" defer></script>
+        <script src="js/script.js?v=2.2" defer></script>
+    </body>
+</html>

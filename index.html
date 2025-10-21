@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="vi">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SmartContent AI - Đăng nhập</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="css/style.css" />
+    </head>
+    <body class="bg-slate-900 flex items-center justify-center h-screen">
+        <div class="w-full max-w-md mx-auto">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold flex items-center justify-center text-white">
+                    <i class="fas fa-power-off mr-3 text-blue-400 text-4xl"></i>
+                    <span>SmartContent AI</span>
+                </h1>
+            </div>
+
+            <div class="bg-slate-800 rounded-xl shadow-lg p-8">
+                <h2 class="text-2xl font-bold text-center text-white mb-6">Đăng nhập</h2>
+                <form id="loginForm">
+                    <div class="space-y-6">
+                        <div>
+                            <label for="email" class="block text-sm font-medium text-gray-300 mb-1">Email</label>
+                            <div class="relative">
+                                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                                    <i class="fas fa-at text-gray-400"></i>
+                                </span>
+                                <input
+                                    type="email"
+                                    id="email"
+                                    placeholder="e.g. admin@smartcontent.ai"
+                                    required
+                                    class="w-full bg-slate-700 border border-slate-600 rounded-lg pl-10 pr-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                            </div>
+                        </div>
+                        <div>
+                            <label for="password" class="block text-sm font-medium text-gray-300 mb-1">Mật khẩu</label>
+                            <div class="relative">
+                                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                                    <i class="fas fa-lock text-gray-400"></i>
+                                </span>
+                                <input
+                                    type="password"
+                                    id="password"
+                                    placeholder="••••••••"
+                                    required
+                                    class="w-full bg-slate-700 border border-slate-600 rounded-lg pl-10 pr-10 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <button
+                                    type="button"
+                                    id="togglePassword"
+                                    class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-white"
+                                >
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Vùng hiển thị lỗi -->
+                    <p id="errorMessage" class="text-red-400 text-sm text-center mt-4 h-5"></p>
+
+                    <div class="mt-4">
+                        <button
+                            type="submit"
+                            class="w-full flex items-center justify-center px-4 py-3 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition duration-300"
+                        >
+                            Đăng nhập
+                        </button>
+                    </div>
+                </form>
+
+                <div class="text-center text-sm text-gray-400 mt-6 space-y-2">
+                    <a href="forgot-password.html" class="font-medium text-blue-400 hover:underline">Quên mật khẩu?</a>
+                    <p>
+                        Chưa có tài khoản?
+                        <a href="register.html" class="font-medium text-blue-400 hover:underline">Đăng ký</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+        <script>
+            document.addEventListener("DOMContentLoaded", () => {
+                const loginForm = document.getElementById("loginForm");
+                const errorMessage = document.getElementById("errorMessage");
+
+                loginForm.addEventListener("submit", (e) => {
+                    e.preventDefault();
+                    errorMessage.textContent = ""; // Xóa lỗi cũ
+
+                    const email = document.getElementById("email").value;
+                    const password = document.getElementById("password").value;
+
+                    fetch("/smartcontent-app/api/login.php", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ email, password }),
+                    })
+                        .then((response) => response.json())
+                        .then((data) => {
+                            if (data.success) {
+                                // Lưu thông tin và chuyển hướng
+                                localStorage.setItem("authToken", data.token);
+                                localStorage.setItem("currentUser", JSON.stringify(data.user));
+                                window.location.href = "articlewriter.html";
+                            } else {
+                                if (data.status === "inactive") {
+                                    // Nếu tài khoản chưa kích hoạt, lưu tạm userId và chuyển hướng
+                                    localStorage.setItem("activationUserId", data.userId);
+                                    window.location.href = "activate.html";
+                                } else {
+                                    // HIỂN THỊ LỖI CHI TIẾT TỪ SERVER
+                                    errorMessage.textContent = data.message || "Đã xảy ra lỗi không xác định.";
+                                }
+                            }
+                        })
+                        .catch((error) => {
+                            console.error("Error:", error);
+                            errorMessage.textContent = "Không thể kết nối đến máy chủ.";
+                        });
+                });
+
+                // Logic bật/tắt xem mật khẩu
+                const togglePassword = document.getElementById("togglePassword");
+                const passwordInput = document.getElementById("password");
+                if (togglePassword && passwordInput) {
+                    togglePassword.addEventListener("click", () => {
+                        const type = passwordInput.getAttribute("type") === "password" ? "text" : "password";
+                        passwordInput.setAttribute("type", type);
+                        const icon = togglePassword.querySelector("i");
+                        icon.classList.toggle("fa-eye");
+                        icon.classList.toggle("fa-eye-slash");
+                    });
+                }
+            });
+        </script>
+    </body>
+</html>

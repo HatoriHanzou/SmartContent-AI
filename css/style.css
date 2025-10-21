@@ -1,0 +1,39 @@
+body {
+    font-family: "Inter", sans-serif;
+    background-color: #1e293b; /* bg-slate-800 */
+    color: #d1d5db; /* Default light text color */
+}
+
+.sidebar {
+    transition: transform 0.3s ease-in-out;
+}
+
+.sidebar-hidden {
+    transform: translateX(-100%);
+}
+@media (min-width: 768px) {
+    .md\:sidebar-hidden-none {
+        transform: translateX(0) !important;
+    }
+}
+
+.active-nav {
+    background-color: #334155; /* bg-slate-700 */
+    color: #ffffff; /* text-white */
+}
+
+/* Style for placeholders in dark mode */
+::placeholder {
+    color: #6b7280; /* text-gray-500 */
+    opacity: 1; /* Firefox */
+}
+
+::-ms-input-placeholder {
+    /* Internet Explorer 10-11 */
+    color: #6b7280;
+}
+
+::-ms-input-placeholder {
+    /* Microsoft Edge */
+    color: #6b7280;
+}
