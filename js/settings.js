@@ -19,7 +19,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- DOM Elements ---
     const profileForm = document.getElementById("profile-form");
     const passwordForm = document.getElementById("password-form");
-    const aiSettingsForm = document.getElementById("ai-settings-form");
     const emailInput = document.getElementById("profile-email");
     const profileNameInput = document.getElementById("profile-name");
     const profilePhoneInput = document.getElementById("profile-phone");
@@ -34,6 +33,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const wpSiteUrlInput = document.getElementById("wp-site-url");
     const wpUsernameInput = document.getElementById("wp-username");
     const wpAppPasswordInput = document.getElementById("wp-app-password");
+
+    // (DOM Elements cho AI)
+    const aiSettingsForm = document.getElementById("ai-settings-form");
+    const saveAiBtn = document.getElementById("save-ai-btn");
+    const geminiApiKeyInput = document.getElementById("gemini-api-key");
+    const geminiModelSelect = document.getElementById("gemini-model");
+    const openaiApiKeyInput = document.getElementById("openai-api-key");
+    const openaiModelSelect = document.getElementById("openai-model");
+    const aiProviderToggles = document.querySelectorAll(".ai-provider-toggle");
+    const geminiSettings = document.getElementById("gemini-settings");
+    const openaiSettings = document.getElementById("openai-settings");
 
     // Lấy thông tin user hiện tại (chỉ dùng để check quyền admin cho ô email)
     const userString = localStorage.getItem("currentUser");
@@ -58,6 +68,7 @@ document.addEventListener("DOMContentLoaded", () => {
             populateProfileData(data.profile);
             populateLicenseData(data.license);
             populateWordPressData(data.wordpress);
+            populateAiData(data.ai_settings);
         } catch (error) {
             // Lỗi đã được xử lý (alert và/hoặc logout) trong authenticatedFetch
             console.error("settings.js: Lỗi cuối cùng khi tải cài đặt:", error);
@@ -259,12 +270,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // --- AI Provider Toggles Logic ---
-    const aiProviderToggles = document.querySelectorAll(".ai-provider-toggle");
-    const geminiSettings = document.getElementById("gemini-settings");
-    const openaiSettings = document.getElementById("openai-settings");
-
     const setActiveProvider = (provider) => {
-        // Cập nhật giao diện nút toggle
         aiProviderToggles.forEach((btn) => {
             btn.classList.remove("bg-blue-600", "text-white");
             btn.classList.add("text-gray-300");
@@ -289,14 +295,8 @@ document.addEventListener("DOMContentLoaded", () => {
             toggle.addEventListener("click", () => {
                 const provider = toggle.dataset.provider;
                 setActiveProvider(provider);
-                // Lưu lựa chọn vào localStorage (ví dụ)
-                // localStorage.setItem("aiProviderPreference", provider);
             });
         });
-        // Lấy lựa chọn đã lưu (nếu có)
-        // const savedProvider = localStorage.getItem("aiProviderPreference") || "gemini";
-        // setActiveProvider(savedProvider);
-        setActiveProvider("gemini"); // Hoặc mặc định luôn là gemini
     }
 
     // --- START: WORDPRESS LOGIC (THÊM MỚI) ---
@@ -388,6 +388,70 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
     // --- END: WORDPRESS LOGIC ---
+
+    // --- START: AI SETTINGS LOGIC ---
+    const populateAiData = (settings) => {
+        if (settings) {
+            // Set Provider
+            setActiveProvider(settings.ai_provider || "gemini");
+
+            // Set Models
+            geminiModelSelect.value = settings.gemini_model || "gemini-2.5-flash";
+            openaiModelSelect.value = settings.openai_model || "gpt-5";
+
+            // Set API Keys (dùng placeholder)
+            geminiApiKeyInput.value = settings.gemini_key_saved ? "••••••••" : "";
+            openaiApiKeyInput.value = settings.openai_key_saved ? "••••••••" : "";
+        } else {
+            // Giá trị mặc định nếu chưa có cài đặt
+            setActiveProvider("gemini");
+        }
+    };
+
+    if (aiSettingsForm) {
+        aiSettingsForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const getKeyValue = (input) => {
+                const value = input.value.trim();
+                if (value === "••••••••") return "unchanged";
+                if (value === "") return "delete";
+                return value; // Gửi key mới
+            };
+
+            // Lấy provider đang active
+            const activeToggle = document.querySelector(".ai-provider-toggle.bg-blue-600");
+            const provider = activeToggle ? activeToggle.dataset.provider : "gemini";
+
+            const payload = {
+                action: "save_ai_settings",
+                ai_provider: provider,
+                gemini_api_key: getKeyValue(geminiApiKeyInput),
+                gemini_model: geminiModelSelect.value,
+                openai_api_key: getKeyValue(openaiApiKeyInput),
+                openai_model: openaiModelSelect.value,
+            };
+
+            setButtonLoading(saveAiBtn, true);
+            try {
+                const result = await authenticatedFetch(`/smartcontent-app/api/settings.php`, {
+                    method: "POST",
+                    body: JSON.stringify(payload),
+                });
+
+                alert(result.message);
+
+                if (result.success) {
+                    await fetchSettings();
+                }
+            } catch (error) {
+                console.error("Lỗi khi lưu AI Settings:", error);
+            } finally {
+                setButtonLoading(saveAiBtn, false);
+            }
+        });
+    }
+    // --- END: AI SETTINGS LOGIC ---
 
     // --- Initial Load ---
     // Đảm bảo authenticatedFetch sẵn sàng trước khi gọi

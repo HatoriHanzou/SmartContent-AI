@@ -25,6 +25,23 @@ function encrypt_wp_pass($password) {
 }
 // --- END: WP ENCRYPTION HELPERS ---
 
+function decrypt_data($encrypted_data) {
+    if (empty($encrypted_data) || !defined('JWT_SECRET')) {
+        return null; // Trả về null nếu không có gì để giải mã hoặc thiếu key
+    }
+    try {
+        $key = JWT_SECRET;
+        $c = base64_decode($encrypted_data);
+        $ivlen = openssl_cipher_iv_length(WP_ENCRYPT_CIPHER);
+        $iv = substr($c, 0, $ivlen);
+        $ciphertext = substr($c, $ivlen);
+        return openssl_decrypt($ciphertext, WP_ENCRYPT_CIPHER, $key, OPENSSL_RAW_DATA, $iv);
+    } catch (Exception $e) {
+        error_log("Lỗi giải mã: " . $e->getMessage());
+        return null;
+    }
+}
+
 // --- START: WP VALIDATION HELPER ---
 function validate_wp_credentials($site_url, $username, $app_password) {
     // Rtrim để xóa dấu / cuối (nếu có) và thêm endpoint
@@ -74,6 +91,63 @@ function validate_wp_credentials($site_url, $username, $app_password) {
 }
 // --- END: WP VALIDATION HELPER ---
 
+function validate_gemini_key($api_key) {
+    // API của Google Gemini dùng ?key=...
+    $api_url = 'https://generativelanguage.googleapis.com/v1beta/models?key=' . $api_key;
+    
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $api_url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    
+    $response_body = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    if ($http_code === 200) return ['success' => true];
+    
+    // Phân tích lỗi JSON nếu có
+    $error_msg = "Xác thực thất bại (Lỗi $http_code).";
+    if ($response_body) {
+        $error_data = json_decode($response_body, true);
+        if (isset($error_data['error']['message'])) {
+            $error_msg = $error_data['error']['message'];
+        }
+    }
+    return ['success' => false, 'message' => $error_msg];
+}
+
+function validate_openai_key($api_key) {
+    // API của OpenAI dùng Bearer Token
+    $api_url = 'https://api.openai.com/v1/models'; // Endpoint liệt kê model
+    
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $api_url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Authorization: Bearer ' . $api_key,
+        'Content-Type: application/json'
+    ]);
+    
+    $response_body = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    if ($http_code === 200) return ['success' => true];
+    
+    $error_msg = "Xác thực thất bại (Lỗi $http_code).";
+     if ($response_body) {
+        $error_data = json_decode($response_body, true);
+        if (isset($error_data['error']['message'])) {
+            $error_msg = $error_data['error']['message'];
+        }
+    }
+    return ['success' => false, 'message' => $error_msg];
+}
+
 try {
     // SỬA LỖI QUAN TRỌNG: Lấy đúng user_data từ token đã giải mã
     $user_data = authenticate_user(); // Hàm này trả về object data từ token
@@ -113,6 +187,9 @@ try {
         case 'delete_wp_site':
             delete_wp_site($conn, $user_id, $data);
             break;
+        case 'save_ai_settings':
+            save_ai_settings($conn, $user_id, $data);
+            break;
         default:
             echo json_encode(['success' => false, 'message' => 'Hành động không hợp lệ.']);
     }
@@ -128,8 +205,7 @@ try {
 
 // Hàm lấy tất cả cài đặt
 function get_all_settings($conn, $user_id) {
-    $response = ['success' => true, 'profile' => null, 'license' => null, 'wordpress' => []];
-    try {
+        $response = ['success' => true, 'profile' => null, 'license' => null, 'wordpress' => [], 'ai_settings' => null];    try {
         // Lấy thông tin cá nhân
         $stmt_profile = $conn->prepare("SELECT name, email, phone FROM users WHERE id = ?");
         $stmt_profile->bind_param("i", $user_id);
@@ -188,6 +264,28 @@ function get_all_settings($conn, $user_id) {
         // Không làm sập script, chỉ ghi log và để response['license'] = null
         // JavaScript sẽ tự xử lý hiển thị "Chưa kích hoạt"
         error_log("Lỗi khi lấy license (có thể do thiếu bảng): " . $e->getMessage());
+    }
+
+    try {
+        $stmt_ai = $conn->prepare("
+            SELECT ai_provider, gemini_model, openai_model, 
+                   (gemini_api_key IS NOT NULL AND gemini_api_key != '') AS gemini_key_saved, 
+                   (openai_api_key IS NOT NULL AND openai_api_key != '') AS openai_key_saved
+            FROM user_settings 
+            WHERE user_id = ?
+        ");
+        $stmt_ai->bind_param("i", $user_id);
+        $stmt_ai->execute();
+        $result = $stmt_ai->get_result()->fetch_assoc();
+        if ($result) {
+            // Chuyển đổi giá trị '0'/'1' từ SQL sang true/false
+            $result['gemini_key_saved'] = (bool)$result['gemini_key_saved'];
+            $result['openai_key_saved'] = (bool)$result['openai_key_saved'];
+            $response['ai_settings'] = $result;
+        }
+        $stmt_ai->close();
+    } catch (Exception $e) {
+        error_log("Lỗi khi lấy AI Settings: " . $e->getMessage());
     }
 
     echo json_encode($response);
@@ -365,6 +463,77 @@ function delete_wp_site($conn, $user_id, $data) {
         $stmt->close();
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'message' => 'Lỗi CSDL: ' . $e->getMessage()]);
+    }
+}
+
+function save_ai_settings($conn, $user_id, $data) {
+    // Lấy dữ liệu
+    $provider = $data->ai_provider ?? 'gemini';
+    $gemini_key = $data->gemini_api_key ?? null;
+    $gemini_model = $data->gemini_model ?? 'gemini-2.5-flash';
+    $openai_key = $data->openai_api_key ?? null;
+    $openai_model = $data->openai_model ?? 'gpt-5';
+
+    // Lấy cài đặt hiện tại để kiểm tra
+    $stmt_get = $conn->prepare("SELECT gemini_api_key, openai_api_key FROM user_settings WHERE user_id = ?");
+    $stmt_get->bind_param("i", $user_id);
+    $stmt_get->execute();
+    $current_settings = $stmt_get->get_result()->fetch_assoc();
+    $stmt_get->close();
+
+    $new_gemini_key_encrypted = $current_settings['gemini_api_key'] ?? null;
+    $new_openai_key_encrypted = $current_settings['openai_api_key'] ?? null;
+    $message = "Lưu thành công. ";
+
+    try {
+        // Xử lý Gemini Key
+        if ($gemini_key === "delete") {
+            $new_gemini_key_encrypted = null;
+        } elseif ($gemini_key && $gemini_key !== "unchanged") {
+            $validation = validate_gemini_key($gemini_key);
+            if (!$validation['success']) {
+                echo json_encode(['success' => false, 'message' => 'Lỗi Gemini Key: ' . $validation['message']]);
+                return;
+            }
+            $new_gemini_key_encrypted = encrypt_wp_pass($gemini_key);
+            $message .= "Đã xác thực & lưu Gemini Key. ";
+        }
+
+        // Xử lý OpenAI Key
+        if ($openai_key === "delete") {
+            $new_openai_key_encrypted = null;
+        } elseif ($openai_key && $openai_key !== "unchanged") {
+            $validation = validate_openai_key($openai_key);
+            if (!$validation['success']) {
+                echo json_encode(['success' => false, 'message' => 'Lỗi OpenAI Key: ' . $validation['message']]);
+                return;
+            }
+            $new_openai_key_encrypted = encrypt_wp_pass($openai_key);
+            $message .= "Đã xác thực & lưu OpenAI Key.";
+        }
+        
+        // Lưu vào CSDL (INSERT ... ON DUPLICATE KEY UPDATE)
+        $stmt_save = $conn->prepare("
+            INSERT INTO user_settings (user_id, ai_provider, gemini_api_key, gemini_model, openai_api_key, openai_model) 
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE 
+                ai_provider = VALUES(ai_provider), 
+                gemini_api_key = VALUES(gemini_api_key), 
+                gemini_model = VALUES(gemini_model), 
+                openai_api_key = VALUES(openai_api_key), 
+                openai_model = VALUES(openai_model)
+        ");
+        $stmt_save->bind_param("isssss", $user_id, $provider, $new_gemini_key_encrypted, $gemini_model, $new_openai_key_encrypted, $openai_model);
+        
+        if ($stmt_save->execute()) {
+            echo json_encode(['success' => true, 'message' => $message]);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Lỗi khi lưu cài đặt vào CSDL.']);
+        }
+        $stmt_save->close();
+
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'Lỗi hệ thống: ' . $e->getMessage()]);
     }
 }
 ?>
