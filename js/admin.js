@@ -305,7 +305,7 @@ document.addEventListener("DOMContentLoaded", () => {
             return; // Dừng lại sau khi xử lý "edit"
         }
 
-        // 2. Check nút XÓA (PHẦN MỚI THÊM VÀO)
+        // 2. Check nút XÓA (PHẦN BỔ SUNG)
         const deleteBtn = e.target.closest(".delete-user-btn");
         if (deleteBtn) {
             const userId = deleteBtn.closest("tr")?.dataset?.id;
@@ -366,7 +366,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // ==== DELETE USER (HÀM MỚI) ====
-    const handleDeleteUser = async (id) => {
+    async function handleDeleteUser(id) {
         try {
             const res = await fetch("/smartcontent-app/api/admin.php", {
                 method: "POST",
@@ -381,7 +381,7 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (err) {
             showToast("❌ Lỗi khi xóa người dùng.", "error");
         }
-    };
+    }
 
     // ==== EVENT TÌM KIẾM & LỌC ====
     licenseSearchInput?.addEventListener("input", () => renderLicenses());
