@@ -9,55 +9,99 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php'; // Sử dụng hàm authenticate_user()
 
-// --- START: WP ENCRYPTION HELPERS ---
+// --- START: WP/AI ENCRYPTION HELPERS ---
 define('WP_ENCRYPT_CIPHER', 'AES-256-CBC'); 
 
+/**
+ * Mã hóa mật khẩu (dùng cho WP App Pass và AI Keys)
+ */
 function encrypt_wp_pass($password) {
     if (!defined('JWT_SECRET')) {
         throw new Exception("JWT_SECRET is not defined in config.php");
     }
-    $key = JWT_SECRET; // Tái sử dụng secret key
+    // Tạo key 32-byte (256-bit) từ JWT_SECRET
+    $key = hash('sha256', JWT_SECRET, true); 
+
     $ivlen = openssl_cipher_iv_length(WP_ENCRYPT_CIPHER);
     $iv = openssl_random_pseudo_bytes($ivlen);
     $ciphertext = openssl_encrypt($password, WP_ENCRYPT_CIPHER, $key, OPENSSL_RAW_DATA, $iv);
     // Kết hợp IV (vector khởi tạo) với mật mã để giải mã sau này
     return base64_encode($iv . $ciphertext); 
 }
-// --- END: WP ENCRYPTION HELPERS ---
 
+/**
+ * Giải mã dữ liệu (dùng cho WP App Pass và AI Keys)
+ * Phiên bản an toàn, chống lỗi "Lỗi giải mã key."
+ */
 function decrypt_data($encrypted_data) {
     if (empty($encrypted_data) || !defined('JWT_SECRET')) {
-        return null; // Trả về null nếu không có gì để giải mã hoặc thiếu key
+        return null;
     }
     try {
-        $key = JWT_SECRET;
+        // Lấy key 32-byte
+        $key = hash('sha256', JWT_SECRET, true);
+        
+        // 1. Giải mã Base64
         $c = base64_decode($encrypted_data);
+        if ($c === false) {
+            error_log("base64_decode failed.");
+            return null;
+        }
+
+        // 2. Lấy độ dài IV
         $ivlen = openssl_cipher_iv_length(WP_ENCRYPT_CIPHER);
-        $iv = substr($c, 0, $ivlen);
-        $ciphertext = substr($c, $ivlen);
-        return openssl_decrypt($ciphertext, WP_ENCRYPT_CIPHER, $key, OPENSSL_RAW_DATA, $iv);
+        
+        // 3. Tách IV và Ciphertext (Phiên bản an toàn)
+        $iv = null;
+        $ciphertext = null;
+        if (function_exists('mb_substr')) {
+             // Sử dụng '8bit' encoding để xử lý byte thô
+             $iv = mb_substr($c, 0, $ivlen, '8bit');
+             $ciphertext = mb_substr($c, $ivlen, null, '8bit');
+        } else {
+             $iv = substr($c, 0, $ivlen);
+             $ciphertext = substr($c, $ivlen);
+        }
+
+        // Kiểm tra nếu tách chuỗi thất bại
+        if ($iv === false || $ciphertext === false || $iv === null || $ciphertext === null) {
+             error_log("Substr/mb_substr failed to extract IV or Ciphertext.");
+             return null;
+        }
+
+        // 4. Giải mã
+        $decrypted = openssl_decrypt($ciphertext, WP_ENCRYPT_CIPHER, $key, OPENSSL_RAW_DATA, $iv);
+        
+        if ($decrypted === false) {
+             error_log("OpenSSL decrypt failed (key/iv/padding mismatch).");
+             return null;
+        }
+        
+        return $decrypted;
+
     } catch (Exception $e) {
         error_log("Lỗi giải mã: " . $e->getMessage());
         return null;
     }
 }
+// --- END: WP/AI ENCRYPTION HELPERS ---
 
-// --- START: WP VALIDATION HELPER ---
+
+// --- START: VALIDATION HELPERS ---
+
+/**
+ * Xác thực thông tin WordPress
+ */
 function validate_wp_credentials($site_url, $username, $app_password) {
-    // Rtrim để xóa dấu / cuối (nếu có) và thêm endpoint
     $api_url = rtrim($site_url, '/') . '/wp-json/wp/v2/users/me';
 
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $api_url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 15); // Tăng timeout lên 15 giây
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
     curl_setopt($ch, CURLOPT_USERAGENT, 'SmartContentAI-Validator');
-    
-    // Xác thực Basic Auth (Mật khẩu ứng dụng dùng cái này)
     curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
     curl_setopt($ch, CURLOPT_USERPWD, "$username:$app_password");
-
-    // Xử lý SSL (Cần thiết cho nhiều môi trường shared host)
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
 
@@ -69,30 +113,24 @@ function validate_wp_credentials($site_url, $username, $app_password) {
     if ($curl_error) {
         return ['success' => false, 'message' => "Lỗi kết nối (cURL): " . $curl_error . ". Vui lòng kiểm tra lại URL."];
     }
-
     if ($http_code === 200) {
         $data = json_decode($response_body);
-        if ($data && isset($data->id)) {
-            // Thành công, API trả về thông tin user
-            return ['success' => true];
-        }
+        if ($data && isset($data->id)) return ['success' => true];
         return ['success' => false, 'message' => "Kết nối thành công nhưng phản hồi không hợp lệ."];
     }
-
     if ($http_code === 401 || $http_code === 403) {
         return ['success' => false, 'message' => "Xác thực thất bại (Lỗi $http_code). Sai Tên người dùng hoặc Mật khẩu ứng dụng."];
     }
-    
     if ($http_code === 404) {
          return ['success' => false, 'message' => "Lỗi 404. Endpoint API không tồn tại. URL có thể sai hoặc REST API/Mật khẩu ứng dụng chưa được bật."];
     }
-
     return ['success' => false, 'message' => "Lỗi không xác định từ máy chủ WordPress (Lỗi $http_code)."];
 }
-// --- END: WP VALIDATION HELPER ---
 
+/**
+ * Xác thực Gemini API Key
+ */
 function validate_gemini_key($api_key) {
-    // API của Google Gemini dùng ?key=...
     $api_url = 'https://generativelanguage.googleapis.com/v1beta/models?key=' . $api_key;
     
     $ch = curl_init();
@@ -107,20 +145,19 @@ function validate_gemini_key($api_key) {
     
     if ($http_code === 200) return ['success' => true];
     
-    // Phân tích lỗi JSON nếu có
     $error_msg = "Xác thực thất bại (Lỗi $http_code).";
     if ($response_body) {
         $error_data = json_decode($response_body, true);
-        if (isset($error_data['error']['message'])) {
-            $error_msg = $error_data['error']['message'];
-        }
+        if (isset($error_data['error']['message'])) $error_msg = $error_data['error']['message'];
     }
     return ['success' => false, 'message' => $error_msg];
 }
 
+/**
+ * Xác thực OpenAI API Key
+ */
 function validate_openai_key($api_key) {
-    // API của OpenAI dùng Bearer Token
-    $api_url = 'https://api.openai.com/v1/models'; // Endpoint liệt kê model
+    $api_url = 'https://api.openai.com/v1/models';
     
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -141,26 +178,28 @@ function validate_openai_key($api_key) {
     $error_msg = "Xác thực thất bại (Lỗi $http_code).";
      if ($response_body) {
         $error_data = json_decode($response_body, true);
-        if (isset($error_data['error']['message'])) {
-            $error_msg = $error_data['error']['message'];
-        }
+        if (isset($error_data['error']['message'])) $error_msg = $error_data['error']['message'];
     }
     return ['success' => false, 'message' => $error_msg];
 }
+// --- END: VALIDATION HELPERS ---
 
+
+// --- START: MAIN ROUTER ---
 try {
-    // SỬA LỖI QUAN TRỌNG: Lấy đúng user_data từ token đã giải mã
-    $user_data = authenticate_user(); // Hàm này trả về object data từ token
+    // 1. Xác thực người dùng
+    $user_data = authenticate_user();
     if (!$user_data) {
         exit(); // Dừng nếu xác thực thất bại
     }
-    $user_id = $user_data->id; // Lấy ID người dùng từ payload
-    $user_role = $user_data->role; // Lấy ROLE người dùng từ payload
+    $user_id = $user_data->id;
+    $user_role = $user_data->role;
 
+    // 2. Kết nối DB
     $conn = get_db_connection();
     $action = '';
 
-    // Xác định hành động (GET để lấy dữ liệu, POST để cập nhật)
+    // 3. Xác định hành động
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action'])) {
         $action = $_GET['action'];
     } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -170,12 +209,12 @@ try {
         }
     }
 
+    // 4. Điều hướng
     switch ($action) {
         case 'get_settings':
             get_all_settings($conn, $user_id);
             break;
         case 'update_profile':
-            // Truyền cả user_role vào hàm update
             update_profile($conn, $user_id, $user_role, $data);
             break;
         case 'update_password':
@@ -197,29 +236,32 @@ try {
     $conn->close();
 
 } catch (Exception $e) {
-    // Bắt các lỗi nghiêm trọng (ví dụ: không thể kết nối DB)
-    http_response_code(500); // Internal Server Error
+    http_response_code(500);
     echo json_encode(['success' => false, 'message' => 'Lỗi máy chủ nghiêm trọng: ' . $e->getMessage()]);
 }
+// --- END: MAIN ROUTER ---
 
 
-// Hàm lấy tất cả cài đặt
+// --- START: ACTION FUNCTIONS ---
+
+/**
+ * Lấy tất cả cài đặt
+ * (Đã nâng cấp để xác thực key khi tải)
+ */
 function get_all_settings($conn, $user_id) {
-        $response = ['success' => true, 'profile' => null, 'license' => null, 'wordpress' => [], 'ai_settings' => null];    try {
-        // Lấy thông tin cá nhân
+    $response = ['success' => true, 'profile' => null, 'license' => null, 'wordpress' => [], 'ai_settings' => null];
+    
+    // 1. Lấy Profile
+    try {
         $stmt_profile = $conn->prepare("SELECT name, email, phone FROM users WHERE id = ?");
         $stmt_profile->bind_param("i", $user_id);
         $stmt_profile->execute();
         $response['profile'] = $stmt_profile->get_result()->fetch_assoc();
         $stmt_profile->close();
-
         if (!$response['profile']) {
-             // Lỗi không tìm thấy user (dù đã qua xác thực)
              throw new Exception("Không tìm thấy dữ liệu người dùng.");
         }
-
     } catch (Exception $e) {
-        // Lỗi (ví dụ: thiếu bảng users, hoặc cột)
         error_log("Lỗi khi lấy profile: " . $e->getMessage());
         $response['success'] = false;
         $response['message'] = 'Lỗi khi tải thông tin cá nhân: ' . $e->getMessage();
@@ -227,8 +269,8 @@ function get_all_settings($conn, $user_id) {
         return;
     }
 
+    // 2. Lấy WordPress
     try {
-        // Lấy danh sách WP Sites (Không lấy mật khẩu)
         $stmt_wp = $conn->prepare("SELECT id, site_url, wp_username FROM wordpress_sites WHERE user_id = ?");
         $stmt_wp->bind_param("i", $user_id);
         $stmt_wp->execute();
@@ -238,10 +280,10 @@ function get_all_settings($conn, $user_id) {
         }
         $stmt_wp->close();
     } catch (Exception $e) {
-        // Không làm hỏng toàn bộ request nếu lỗi
         error_log("Lỗi khi lấy WP Sites: " . $e->getMessage());
     }
 
+    // 3. Lấy License
     try {        
         $stmt_license = $conn->prepare("
             SELECT l.license_key, l.status, l.expires_at, p.name as plan_name 
@@ -253,37 +295,68 @@ function get_all_settings($conn, $user_id) {
         $stmt_license->execute();
         $response['license'] = $stmt_license->get_result()->fetch_assoc();
         $stmt_license->close();
-
-        // Xử lý logic cho admin (nếu LEFT JOIN trả về plan_name = null nhưng có license)
         if ($response['license'] && $response['license']['plan_name'] === null && $response['license']['license_key']) {
             $response['license']['plan_name'] = 'Gói Quản trị viên';
         }
-
     } catch (Exception $e) {
-        // Lỗi (ví dụ: thiếu bảng licenses hoặc plans)
-        // Không làm sập script, chỉ ghi log và để response['license'] = null
-        // JavaScript sẽ tự xử lý hiển thị "Chưa kích hoạt"
         error_log("Lỗi khi lấy license (có thể do thiếu bảng): " . $e->getMessage());
     }
 
+    // 4. Lấy và Xác thực AI Settings
     try {
         $stmt_ai = $conn->prepare("
             SELECT ai_provider, gemini_model, openai_model, 
-                   (gemini_api_key IS NOT NULL AND gemini_api_key != '') AS gemini_key_saved, 
-                   (openai_api_key IS NOT NULL AND openai_api_key != '') AS openai_key_saved
+                   gemini_api_key, openai_api_key
             FROM user_settings 
             WHERE user_id = ?
         ");
         $stmt_ai->bind_param("i", $user_id);
         $stmt_ai->execute();
         $result = $stmt_ai->get_result()->fetch_assoc();
-        if ($result) {
-            // Chuyển đổi giá trị '0'/'1' từ SQL sang true/false
-            $result['gemini_key_saved'] = (bool)$result['gemini_key_saved'];
-            $result['openai_key_saved'] = (bool)$result['openai_key_saved'];
-            $response['ai_settings'] = $result;
-        }
         $stmt_ai->close();
+
+        if ($result) {
+            $ai_settings_response = [
+                'ai_provider' => $result['ai_provider'],
+                'gemini_model' => $result['gemini_model'],
+                'openai_model' => $result['openai_model'],
+                'gemini_key_status' => 'none', 'gemini_key_error' => null,
+                'openai_key_status' => 'none', 'openai_key_error' => null,
+            ];
+
+            if (!empty($result['gemini_api_key'])) {
+                $decrypted_gemini = decrypt_data($result['gemini_api_key']);
+                if ($decrypted_gemini) {
+                    $validation = validate_gemini_key($decrypted_gemini);
+                    if ($validation['success']) {
+                        $ai_settings_response['gemini_key_status'] = 'valid';
+                    } else {
+                        $ai_settings_response['gemini_key_status'] = 'invalid';
+                        $ai_settings_response['gemini_key_error'] = $validation['message'];
+                    }
+                } else {
+                    $ai_settings_response['gemini_key_status'] = 'invalid';
+                    $ai_settings_response['gemini_key_error'] = 'Lỗi giải mã key.';
+                }
+            }
+
+            if (!empty($result['openai_api_key'])) {
+                $decrypted_openai = decrypt_data($result['openai_api_key']);
+                if ($decrypted_openai) {
+                    $validation = validate_openai_key($decrypted_openai);
+                    if ($validation['success']) {
+                        $ai_settings_response['openai_key_status'] = 'valid';
+                    } else {
+                        $ai_settings_response['openai_key_status'] = 'invalid';
+                        $ai_settings_response['openai_key_error'] = $validation['message'];
+                    }
+                } else {
+                    $ai_settings_response['openai_key_status'] = 'invalid';
+                    $ai_settings_response['openai_key_error'] = 'Lỗi giải mã key.';
+                }
+            }
+            $response['ai_settings'] = $ai_settings_response;
+        }
     } catch (Exception $e) {
         error_log("Lỗi khi lấy AI Settings: " . $e->getMessage());
     }
@@ -291,7 +364,9 @@ function get_all_settings($conn, $user_id) {
     echo json_encode($response);
 }
 
-// Hàm cập nhật thông tin cá nhân
+/**
+ * Cập nhật thông tin cá nhân
+ */
 function update_profile($conn, $user_id, $user_role, $data) {
     if (!isset($data->name) || !isset($data->phone) || !isset($data->email)) {
         echo json_encode(['success' => false, 'message' => 'Thiếu thông tin.']);
@@ -302,15 +377,11 @@ function update_profile($conn, $user_id, $user_role, $data) {
     $phone = trim($data->phone);
     $email = trim($data->email);
 
-    // Kiểm tra nếu admin đang cập nhật email
     if (strtolower($user_role) === 'admin') {
-        // 1. Validate email
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             echo json_encode(['success' => false, 'message' => 'Định dạng email không hợp lệ.']);
             return;
         }
-        
-        // 2. Kiểm tra email đã tồn tại (cho user khác) chưa
         $stmt_check = $conn->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
         $stmt_check->bind_param("si", $email, $user_id);
         $stmt_check->execute();
@@ -320,19 +391,14 @@ function update_profile($conn, $user_id, $user_role, $data) {
             return;
         }
         $stmt_check->close();
-
-        // 3. Cập nhật cả name, phone, và email
         $stmt = $conn->prepare("UPDATE users SET name = ?, phone = ?, email = ? WHERE id = ?");
         $stmt->bind_param("sssi", $name, $phone, $email, $user_id);
-
     } else {
-        // User thường chỉ được cập nhật name và phone
         $stmt = $conn->prepare("UPDATE users SET name = ?, phone = ? WHERE id = ?");
         $stmt->bind_param("ssi", $name, $phone, $user_id);
     }
 
     if ($stmt->execute()) {
-        // Nếu là admin đổi email, cũng cần cập nhật lại thông tin user trong localStorage
         if (strtolower($user_role) === 'admin') {
              echo json_encode(['success' => true, 'message' => 'Cập nhật thông tin thành công!', 'needsUpdate' => true, 'newData' => ['name' => $name, 'email' => $email]]);
         } else {
@@ -344,7 +410,9 @@ function update_profile($conn, $user_id, $user_role, $data) {
     $stmt->close();
 }
 
-// Hàm cập nhật mật khẩu
+/**
+ * Cập nhật mật khẩu
+ */
 function update_password($conn, $user_id, $data) {
     if (!isset($data->current_password) || !isset($data->new_password) || empty($data->current_password) || empty($data->new_password)) {
         echo json_encode(['success' => false, 'message' => 'Vui lòng nhập đủ mật khẩu.']);
@@ -379,8 +447,9 @@ function update_password($conn, $user_id, $data) {
     }
 }
 
-// --- CÁC HÀM MỚI CHO WORDPRESS ---
-
+/**
+ * Thêm/Cập nhật kết nối WordPress
+ */
 function add_wp_site($conn, $user_id, $data) {
     if (!isset($data->site_url) || !isset($data->wp_username) || !isset($data->wp_app_password) || 
         empty($data->site_url) || empty($data->wp_username) || empty($data->wp_app_password)) {
@@ -390,18 +459,16 @@ function add_wp_site($conn, $user_id, $data) {
 
     $site_url = trim($data->site_url);
     $wp_username = trim($data->wp_username);
-    $raw_password = trim($data->wp_app_password); // Lấy mật khẩu gốc
+    $raw_password = trim($data->wp_app_password);
 
     if (!filter_var($site_url, FILTER_VALIDATE_URL)) {
         echo json_encode(['success' => false, 'message' => 'URL Website không hợp lệ.']);
         return;
     }
     
-    // --- BƯỚC XÁC THỰC MỚI ---
     try {
         $validation_result = validate_wp_credentials($site_url, $wp_username, $raw_password);
         if (!$validation_result['success']) {
-            // Trả về lỗi xác thực chi tiết cho client
             echo json_encode(['success' => false, 'message' => $validation_result['message']]);
             return;
         }
@@ -409,20 +476,15 @@ function add_wp_site($conn, $user_id, $data) {
         echo json_encode(['success' => false, 'message' => 'Lỗi hệ thống khi xác thực: ' . $e->getMessage()]);
         return;
     }
-    // --- KẾT THÚC BƯỚC XÁC THỰC ---
     
-    // Nếu xác thực thành công, TIẾP TỤC LƯU
     try {
-        // Mã hóa mật khẩu
         $encrypted_pass = encrypt_wp_pass($raw_password);
 
-        // Tạm thời: Xóa kết nối cũ để thêm kết nối mới (chỉ cho phép 1 site/user)
         $stmt_delete = $conn->prepare("DELETE FROM wordpress_sites WHERE user_id = ?");
         $stmt_delete->bind_param("i", $user_id);
         $stmt_delete->execute();
         $stmt_delete->close();
         
-        // Thêm kết nối mới
         $stmt = $conn->prepare("INSERT INTO wordpress_sites (user_id, site_url, wp_username, wp_application_password) VALUES (?, ?, ?, ?)");
         $stmt->bind_param("isss", $user_id, $site_url, $wp_username, $encrypted_pass);
         
@@ -438,6 +500,9 @@ function add_wp_site($conn, $user_id, $data) {
     }
 }
 
+/**
+ * Xóa kết nối WordPress
+ */
 function delete_wp_site($conn, $user_id, $data) {
     if (!isset($data->id) || empty($data->id)) {
         echo json_encode(['success' => false, 'message' => 'Thiếu ID của site.']);
@@ -447,7 +512,6 @@ function delete_wp_site($conn, $user_id, $data) {
     $site_id = intval($data->id);
 
     try {
-        // Xóa site, đảm bảo user_id khớp để bảo mật
         $stmt = $conn->prepare("DELETE FROM wordpress_sites WHERE id = ? AND user_id = ?");
         $stmt->bind_param("ii", $site_id, $user_id);
         
@@ -466,15 +530,16 @@ function delete_wp_site($conn, $user_id, $data) {
     }
 }
 
+/**
+ * Lưu cài đặt AI
+ */
 function save_ai_settings($conn, $user_id, $data) {
-    // Lấy dữ liệu
     $provider = $data->ai_provider ?? 'gemini';
     $gemini_key = $data->gemini_api_key ?? null;
     $gemini_model = $data->gemini_model ?? 'gemini-2.5-flash';
     $openai_key = $data->openai_api_key ?? null;
     $openai_model = $data->openai_model ?? 'gpt-5';
 
-    // Lấy cài đặt hiện tại để kiểm tra
     $stmt_get = $conn->prepare("SELECT gemini_api_key, openai_api_key FROM user_settings WHERE user_id = ?");
     $stmt_get->bind_param("i", $user_id);
     $stmt_get->execute();
@@ -486,7 +551,6 @@ function save_ai_settings($conn, $user_id, $data) {
     $message = "Lưu thành công. ";
 
     try {
-        // Xử lý Gemini Key
         if ($gemini_key === "delete") {
             $new_gemini_key_encrypted = null;
         } elseif ($gemini_key && $gemini_key !== "unchanged") {
@@ -499,7 +563,6 @@ function save_ai_settings($conn, $user_id, $data) {
             $message .= "Đã xác thực & lưu Gemini Key. ";
         }
 
-        // Xử lý OpenAI Key
         if ($openai_key === "delete") {
             $new_openai_key_encrypted = null;
         } elseif ($openai_key && $openai_key !== "unchanged") {
@@ -512,7 +575,6 @@ function save_ai_settings($conn, $user_id, $data) {
             $message .= "Đã xác thực & lưu OpenAI Key.";
         }
         
-        // Lưu vào CSDL (INSERT ... ON DUPLICATE KEY UPDATE)
         $stmt_save = $conn->prepare("
             INSERT INTO user_settings (user_id, ai_provider, gemini_api_key, gemini_model, openai_api_key, openai_model) 
             VALUES (?, ?, ?, ?, ?, ?)
@@ -536,4 +598,5 @@ function save_ai_settings($conn, $user_id, $data) {
         echo json_encode(['success' => false, 'message' => 'Lỗi hệ thống: ' . $e->getMessage()]);
     }
 }
+// --- END: ACTION FUNCTIONS ---
 ?>

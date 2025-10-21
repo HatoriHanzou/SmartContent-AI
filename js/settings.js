@@ -39,8 +39,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const saveAiBtn = document.getElementById("save-ai-btn");
     const geminiApiKeyInput = document.getElementById("gemini-api-key");
     const geminiModelSelect = document.getElementById("gemini-model");
+    const geminiKeyStatusEl = document.getElementById("gemini-key-status"); // MỚI
     const openaiApiKeyInput = document.getElementById("openai-api-key");
     const openaiModelSelect = document.getElementById("openai-model");
+    const openaiKeyStatusEl = document.getElementById("openai-key-status"); // MỚI
     const aiProviderToggles = document.querySelectorAll(".ai-provider-toggle");
     const geminiSettings = document.getElementById("gemini-settings");
     const openaiSettings = document.getElementById("openai-settings");
@@ -391,6 +393,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- START: AI SETTINGS LOGIC ---
     const populateAiData = (settings) => {
+        // Reset trạng thái
+        geminiKeyStatusEl.innerHTML = "";
+        openaiKeyStatusEl.innerHTML = "";
+
         if (settings) {
             // Set Provider
             setActiveProvider(settings.ai_provider || "gemini");
@@ -399,18 +405,54 @@ document.addEventListener("DOMContentLoaded", () => {
             geminiModelSelect.value = settings.gemini_model || "gemini-2.5-flash";
             openaiModelSelect.value = settings.openai_model || "gpt-5";
 
-            // Set API Keys (dùng placeholder)
-            geminiApiKeyInput.value = settings.gemini_key_saved ? "••••••••" : "";
-            openaiApiKeyInput.value = settings.openai_key_saved ? "••••••••" : "";
+            // Set API Keys và Trạng thái
+            // 1. GEMINI
+            switch (settings.gemini_key_status) {
+                case "valid":
+                    geminiApiKeyInput.value = "••••••••";
+                    geminiKeyStatusEl.innerHTML = `<span class="text-green-400">Đã kết nối</span>`;
+                    break;
+                case "invalid":
+                    geminiApiKeyInput.value = "";
+                    geminiApiKeyInput.placeholder = "Key đã lưu bị lỗi. Vui lòng nhập lại.";
+                    geminiKeyStatusEl.innerHTML = `<span class="text-red-400">Lỗi: ${
+                        settings.gemini_key_error || "Key không hợp lệ"
+                    }</span>`;
+                    break;
+                default: // 'none'
+                    geminiApiKeyInput.value = "";
+                    geminiApiKeyInput.placeholder = "Nhập Gemini API Key của bạn";
+                    geminiKeyStatusEl.innerHTML = "";
+            }
+
+            // 2. OPENAI
+            switch (settings.openai_key_status) {
+                case "valid":
+                    openaiApiKeyInput.value = "••••••••";
+                    openaiKeyStatusEl.innerHTML = `<span class="text-green-400">Đã kết nối</span>`;
+                    break;
+                case "invalid":
+                    openaiApiKeyInput.value = "";
+                    openaiApiKeyInput.placeholder = "Key đã lưu bị lỗi. Vui lòng nhập lại.";
+                    openaiKeyStatusEl.innerHTML = `<span class="text-red-400">Lỗi: ${
+                        settings.openai_key_error || "Key không hợp lệ"
+                    }</span>`;
+                    break;
+                default: // 'none'
+                    openaiApiKeyInput.value = "";
+                    openaiApiKeyInput.placeholder = "Nháp API Key của bạn (sk-...)";
+                    openaiKeyStatusEl.innerHTML = "";
+            }
         } else {
             // Giá trị mặc định nếu chưa có cài đặt
             setActiveProvider("gemini");
         }
     };
 
-    if (aiSettingsForm) {
-        aiSettingsForm.addEventListener("submit", async (e) => {
-            e.preventDefault();
+    // === SỬA LỖI: Lắng nghe sự kiện CLICK trên NÚT, không phải "submit" trên FORM ===
+    if (saveAiBtn) {
+        saveAiBtn.addEventListener("click", async (e) => {
+            e.preventDefault(); // Ngăn nút (type="submit") gây refresh trang
 
             const getKeyValue = (input) => {
                 const value = input.value.trim();
