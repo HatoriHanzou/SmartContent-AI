@@ -1,12 +1,17 @@
 <?php
 // Tải các file cần thiết
 require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/libs/SimpleJWT.php'; // KIỂM TRA ĐƯỜNG DẪN NÀY!
+require_once __DIR__ . '/libs/SimpleJWT.php'; 
 require_once __DIR__ . '/db.php';
 
 // !!! QUAN TRỌNG: Không có ký tự trắng hoặc mã HTML nào trước thẻ <?php này !!!
-// error_log("auth.php included at: " . date('Y-m-d H:i:s')); // Bỏ comment nếu cần debug sâu
 
+/**
+ * Xác thực người dùng dựa trên JWT trong header.
+ * * @return object|null Trả về object chứa dữ liệu người dùng nếu thành công, 
+ * hoặc null nếu thất bại (thiếu header, token sai/hết hạn, lỗi license).
+ * Hàm này KHÔNG echo bất cứ thứ gì. Lỗi sẽ được ghi vào error_log.
+ */
 function authenticate_user() {
     $authHeader = null;
     // Lấy header Authorization
@@ -18,18 +23,18 @@ function authenticate_user() {
     }
 
     if (!$authHeader) {
-        http_response_code(401);
+        http_response_code(401); // Set HTTP code
         error_log("authenticate_user: Missing Authorization header");
-        echo json_encode(['success' => false, 'message' => 'Yêu cầu thiếu token xác thực.']);
-        return null;
+        // echo json_encode(['success' => false, 'message' => 'Yêu cầu thiếu token xác thực.']); // *** XÓA ECHO ***
+        return null; // Trả về null
     }
 
     $tokenParts = explode(' ', $authHeader);
     if (count($tokenParts) !== 2 || strtolower($tokenParts[0]) !== 'bearer' || empty($tokenParts[1])) {
-        http_response_code(401);
+        http_response_code(401); // Set HTTP code
         error_log("authenticate_user: Invalid token format");
-        echo json_encode(['success' => false, 'message' => 'Định dạng token không hợp lệ.']);
-        return null;
+        // echo json_encode(['success' => false, 'message' => 'Định dạng token không hợp lệ.']); // *** XÓA ECHO ***
+        return null; // Trả về null
     }
 
     $token = $tokenParts[1];
@@ -47,9 +52,8 @@ function authenticate_user() {
 
         // --- Bước 2: KIỂM TRA LICENSE (Bỏ qua nếu là Admin) ---
         if (isset($user_data->role) && strtolower($user_data->role) !== 'admin') {
-            $conn = null;
+            $conn = null; // Khởi tạo $conn
             try {
-                 // error_log("Checking license for user ID: " . ($user_data->id ?? 'N/A'));
                  $conn = get_db_connection();
                  $license_stmt = $conn->prepare("SELECT id FROM licenses WHERE user_id = ? AND status = 'Active'");
                  if (!isset($user_data->id) || !is_numeric($user_data->id)) {
@@ -60,40 +64,39 @@ function authenticate_user() {
                  $license_stmt->execute();
                  $is_license_active = ($license_stmt->get_result()->num_rows > 0);
                  $license_stmt->close();
-                 $conn->close();
+                 $conn->close(); // Đóng kết nối sau khi kiểm tra xong
 
                  if (!$is_license_active) {
                       error_log("authenticate_user: License not active for user ID: " . $user_data->id);
-                      throw new Exception('License của bạn đã hết hạn hoặc bị thu hồi.'); // Thông báo ngắn gọn hơn
+                      throw new Exception('License của bạn đã hết hạn hoặc bị thu hồi.'); 
                  }
             } catch (Exception $db_e) {
                  error_log("authenticate_user: DB Error during license check: " . $db_e->getMessage());
-                 if ($conn && $conn->ping()) { $conn->close(); }
-                 // Ném lỗi chung để tránh lộ chi tiết DB
-                 throw new Exception('Lỗi khi kiểm tra giấy phép.');
+                 if ($conn && $conn->ping()) { $conn->close(); } // Đóng nếu còn mở khi lỗi
+                 throw new Exception('Lỗi khi kiểm tra giấy phép.'); // Ném lỗi chung
             }
         }
-        // error_log("authenticate_user: Success for user ID: " . ($user_data->id ?? 'N/A')); // Log thành công
-        return $user_data; // Trả về user data nếu OK
+        
+        return $user_data; // *** Trả về user data nếu mọi thứ OK ***
 
     } catch (Exception $e) {
         $message = $e->getMessage();
         $http_code = 401; // Mặc định 401
-        if ($message === 'License của bạn đã hết hạn hoặc bị thu hồi.') {
-            $http_code = 403; // Lỗi License -> 403
-        } else if ($message === 'Expired token') {
-            $message = 'Phiên đăng nhập đã hết hạn.';
-        } else if (strpos($message, 'Signature verification failed') !== false || strpos($message, 'Invalid segment encoding') !== false || strpos($message, 'Wrong number of segments') !== false) {
-             $message = 'Token không hợp lệ.';
-        } else if ($message === 'Lỗi khi kiểm tra giấy phép.') {
-             $http_code = 500; // Lỗi server khi check DB
-        }
+        
+        // Xác định HTTP Code dựa trên lỗi
+        if ($message === 'License của bạn đã hết hạn hoặc bị thu hồi.') $http_code = 403; 
+        else if ($message === 'Expired token') $message = 'Phiên đăng nhập đã hết hạn.';
+        else if (strpos($message, 'Signature verification failed') !== false || 
+                 strpos($message, 'Invalid segment encoding') !== false || 
+                 strpos($message, 'Wrong number of segments') !== false) $message = 'Token không hợp lệ.';
+        else if ($message === 'Lỗi khi kiểm tra giấy phép.') $http_code = 500; 
+        // Các lỗi khác giữ nguyên 401
 
-        error_log("authenticate_user Error ($http_code): " . $e->getMessage());
-        http_response_code($http_code);
-        header('Content-Type: application/json; charset=utf-8'); // Đảm bảo JSON header
-        echo json_encode(['success' => false, 'message' => $message]);
-        return null;
+        error_log("authenticate_user Error ($http_code): " . $message); // Ghi log lỗi
+        http_response_code($http_code); // Set HTTP code
+        // header('Content-Type: application/json; charset=utf-8'); // *** XÓA HEADER (file gọi sẽ đặt) ***
+        // echo json_encode(['success' => false, 'message' => $message]); // *** XÓA ECHO ***
+        return null; // *** Trả về null khi có lỗi ***
     }
 }
 ?>
