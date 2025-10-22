@@ -14,20 +14,14 @@
     </head>
     <body>
         <div class="flex h-screen overflow-hidden">
-            <!-- Sidebar sẽ được chèn vào đây bởi layout.js -->
             <div id="sidebar-placeholder"></div>
 
-            <!-- Nội dung chính -->
             <div class="flex-1 flex flex-col overflow-hidden bg-slate-900">
-                <!-- Header sẽ được chèn vào đây bởi layout.js -->
                 <div id="header-placeholder"></div>
 
-                <!-- Vùng nội dung -->
                 <main class="flex-1 overflow-y-auto p-4 md:p-6">
                     <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                        <!-- Cột trái (40%) -->
                         <div class="lg:col-span-2 bg-slate-800 rounded-xl shadow-lg p-6">
-                            <!-- Tabs -->
                             <div id="article-writer-tabs" class="mb-6 border-b border-slate-700">
                                 <nav class="-mb-px flex space-x-4 relative" aria-label="Tabs">
                                     <button
@@ -54,7 +48,6 @@
                                 </nav>
                             </div>
 
-                            <!-- Nội dung Tab -->
                             <div class="space-y-6">
                                 <div id="keyword-tab-content" class="article-writer-tab-pane">
                                     <label class="block text-sm font-medium mb-2">Từ khóa chính</label>
@@ -81,7 +74,6 @@
                                     />
                                 </div>
 
-                                <!-- Tùy chọn -->
                                 <div class="space-y-5 pt-5 border-t border-slate-700">
                                     <div>
                                         <label class="flex items-center space-x-3 cursor-pointer">
@@ -89,6 +81,7 @@
                                                 id="analyze-competitors-checkbox"
                                                 type="checkbox"
                                                 class="form-checkbox h-5 w-5 bg-slate-700 border-slate-600 rounded text-blue-500 focus:ring-blue-500"
+                                                disabled
                                             />
                                             <span class="text-sm font-medium"
                                                 >Phân tích đối thủ & Tạo dàn ý
@@ -126,6 +119,7 @@
                                                 id="image-toggle"
                                                 type="checkbox"
                                                 class="form-checkbox h-5 w-5 bg-slate-700 border-slate-600 rounded text-blue-500 focus:ring-blue-500"
+                                                disabled
                                             />
                                             <span class="text-sm font-medium">Tạo hình ảnh</span>
                                         </label>
@@ -166,7 +160,6 @@
                             </div>
                         </div>
 
-                        <!-- Cột phải (60%) -->
                         <div class="lg:col-span-3 bg-slate-800 rounded-xl shadow-lg p-6 h-full flex flex-col">
                             <div class="flex flex-wrap gap-2 justify-between items-center mb-4">
                                 <h2 class="text-lg font-semibold text-white">Bài viết đã tạo (0)</h2>
@@ -227,9 +220,8 @@
                 </main>
             </div>
         </div>
-        <!-- Thêm ?v=1.2 để chống lỗi cache của trình duyệt -->
         <script src="js/layout.js?v=2.2" defer></script>
         <script src="js/script.js?v=2.2" defer></script>
-        <script src="js/article_writer.js?v=1.6" defer></script>
+        <script src="js/article_writer.js?v=1.9" defer></script>
     </body>
 </html>

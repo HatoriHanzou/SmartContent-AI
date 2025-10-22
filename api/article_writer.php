@@ -2,259 +2,601 @@
 // Bật chế độ báo lỗi chi tiết (có thể tắt khi deploy)
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
+// **THÊM:** Ghi log lỗi vào file thay vì chỉ hiển thị
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/php-error.log'); // Ghi vào file php-error.log cùng thư mục
+
 header('Content-Type: application/json');
 
 // Tải các file cần thiết
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/auth.php'; 
+require_once __DIR__ . '/auth.php';
 
 // === HÀM decrypt_data ===
-define('WP_ENCRYPT_CIPHER', 'AES-256-CBC'); 
-function decrypt_data($encrypted_data) { /* ... (Giữ nguyên code decrypt_data chính xác) ... */ 
-     if (empty($encrypted_data) || !defined('JWT_SECRET')) return null; try { $key = hash('sha256', JWT_SECRET, true); $c = base64_decode($encrypted_data); if ($c === false) return null; $ivlen = openssl_cipher_iv_length(WP_ENCRYPT_CIPHER); if (strlen($c) <= $ivlen) return null; $iv = null; $ciphertext = null; if (function_exists('mb_substr')) { $iv = mb_substr($c, 0, $ivlen, '8bit'); $ciphertext = mb_substr($c, $ivlen, null, '8bit'); } else { $iv = substr($c, 0, $ivlen); $ciphertext = substr($c, $ivlen); } if ($iv === null || $ciphertext === null || $ciphertext === "") return null; $decrypted = openssl_decrypt($ciphertext, WP_ENCRYPT_CIPHER, $key, OPENSSL_RAW_DATA, $iv); if ($decrypted === false) return null; return $decrypted; } catch (Exception $e) { return null; }
+define('WP_ENCRYPT_CIPHER', 'AES-256-CBC');
+function decrypt_data($encrypted_data) {
+     if (empty($encrypted_data) || !defined('JWT_SECRET')) { error_log("decrypt_data: Empty data or JWT_SECRET not defined."); return null; }
+     try {
+         $key = hash('sha256', JWT_SECRET, true);
+         $c = base64_decode($encrypted_data);
+         if ($c === false) { error_log("decrypt_data: base64_decode failed."); return null; }
+         $ivlen = openssl_cipher_iv_length(WP_ENCRYPT_CIPHER);
+         if ($ivlen === false || strlen($c) <= $ivlen) { error_log("decrypt_data: Invalid cipher length or data too short."); return null; }
+         $iv = null; $ciphertext = null;
+         // Sử dụng substr an toàn hơn
+         $iv = substr($c, 0, $ivlen);
+         $ciphertext = substr($c, $ivlen);
+
+         if ($iv === false || $ciphertext === false || $ciphertext === "") { error_log("decrypt_data: substr failed."); return null; }
+         $decrypted = openssl_decrypt($ciphertext, WP_ENCRYPT_CIPHER, $key, OPENSSL_RAW_DATA, $iv);
+         if ($decrypted === false) { error_log("decrypt_data: openssl_decrypt failed. Error: " . openssl_error_string()); return null; }
+         return $decrypted;
+     } catch (Exception $e) {
+         error_log("decrypt_data Exception: " . $e->getMessage());
+         return null;
+     }
 }
 
-// === HÀM GỌI API AI (Đã nâng cấp word count) ===
-function call_ai_api($provider, $api_key, $model, $prompt, $is_retry = false) { 
-    error_log("[$provider] Calling API with Model: $model. Prompt (start): " . substr($prompt, 0, 100) . ($is_retry ? " (RETRY)" : ""));
-    $max_tokens_to_request = 3500; 
+
+// === HÀM GỌI API AI ===
+function call_ai_api($provider, $api_key, $model, $prompt) {
+    error_log("[$provider] Calling API with Model: $model. Prompt (start): " . substr($prompt, 0, 100));
+    $max_tokens_to_request = 3500;
+    $curl_timeout = 180; // 3 minutes timeout for cURL
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, $curl_timeout);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 20); // Timeout for connection phase
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true); 
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, true); 
+
 
     if ($provider === 'openai') {
         $api_url = 'https://api.openai.com/v1/chat/completions';
-        $model_id = 'gpt-3.5-turbo'; 
-        if ($model === 'gpt-5') $model_id = 'gpt-4'; 
-        
-        $data = [ 'model' => $model_id, 'messages' => [['role' => 'system', 'content' => 'Bạn là AI viết bài SEO chuyên nghiệp. Chỉ trả về nội dung HTML theo yêu cầu.'], ['role' => 'user', 'content' => $prompt]], 'max_tokens' => $max_tokens_to_request, 'temperature' => 0.7 ];
-        
-        $ch = curl_init(); 
-        curl_setopt($ch, CURLOPT_URL, $api_url); curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); curl_setopt($ch, CURLOPT_POST, true); curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data)); curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $api_key,'Content-Type: application/json']); curl_setopt($ch, CURLOPT_TIMEOUT, 180); curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        $response_body = curl_exec($ch); $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE); $curl_error = curl_error($ch); curl_close($ch);
-
-        if ($curl_error) return ['success' => false, 'content' => null, 'error' => 'Lỗi cURL: ' . $curl_error];
-        
-        $result = json_decode($response_body, true);
-        $error_msg_from_api = $result['error']['message'] ?? null;
-
-        if ($http_code !== 200) { 
-             $api_err = $error_msg_from_api ? " Message: $error_msg_from_api" : "";
-             error_log("OpenAI API Error ($http_code): " . $api_err . " | Response: " . $response_body);
-             return ['success' => false, 'content' => null, 'error' => "Lỗi API OpenAI ($http_code).$api_err"]; 
+        $model_id = 'gpt-3.5-turbo';
+        // Check if $model suggests a different OpenAI model
+        if (strpos($model, 'gpt-4') !== false || $model === 'gpt-5') { // Assuming 'gpt-5' maps to gpt-4 or newer
+            $model_id = 'gpt-4'; // Use the appropriate model identifier
+        } elseif (strpos($model, 'gpt-3.5') !== false) {
+             $model_id = 'gpt-3.5-turbo';
         }
+        // Add more model mappings if needed
 
-        if (isset($result['choices'][0]['message']['content'])) {
-            $content = $result['choices'][0]['message']['content'];
-            // Làm sạch HTML trả về (xóa ```html nếu có)
-            $content = preg_replace('/^```html\s*/i', '', $content);
-            $content = preg_replace('/\s*```$/', '', $content);
-            $content = trim($content);
+        $data = [
+            'model' => $model_id,
+            'messages' => [
+                ['role' => 'system', 'content' => 'Bạn là AI viết bài SEO chuyên nghiệp. Chỉ trả về nội dung HTML theo yêu cầu.'],
+                ['role' => 'user', 'content' => $prompt]
+            ],
+            'max_tokens' => $max_tokens_to_request,
+            'temperature' => 0.7
+        ];
 
-            $word_count = str_word_count(strip_tags($content));
-            error_log("[$provider] Generation successful. Word count: $word_count" . ($is_retry ? " (After Retry)" : ""));
+        curl_setopt($ch, CURLOPT_URL, $api_url);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $api_key,
+            'Content-Type: application/json'
+        ]);
 
-            if ($word_count < 2500 && !$is_retry) {
-                error_log("[$provider] Word count ($word_count) low. Retrying with expansion prompt...");
-                $expand_prompt = $prompt . "\n\nNội dung hiện tại (khoảng $word_count từ):\n" . $content . "\n\nVui lòng mở rộng đáng kể bài viết này để đạt ít nhất 2500 từ và không quá 5000 từ, bổ sung thêm thông tin chi tiết, ví dụ, phân tích sâu hơn, đảm bảo tính mạch lạc và chất lượng. CHỈ trả về nội dung HTML đã mở rộng.";
-                return call_ai_api($provider, $api_key, $model, $expand_prompt, true); // Gọi lại
-            }
+    } elseif ($provider === 'gemini') {
+        // Use the model name directly provided from settings
+        $api_url = 'https://generativelanguage.googleapis.com/v1beta/models/' . $model . ':generateContent?key=' . $api_key;
+        $data = [
+            'contents' => [
+                [
+                    'parts' => [['text' => $prompt]]
+                ]
+            ],
+            'generationConfig' => [
+                'temperature' => 0.7,
+                'maxOutputTokens' => $max_tokens_to_request
+            ]
+            // Gemini API v1beta doesn't typically use max_tokens in generationConfig for generateContent
+            // but maxOutputTokens instead. Keep this structure unless API docs specify otherwise.
+        ];
+        curl_setopt($ch, CURLOPT_URL, $api_url);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
 
-            $warning = null;
-            if ($word_count < 2500) $warning = "Số từ ($word_count) vẫn thấp hơn yêu cầu (2500)."; 
-            if ($word_count > 5000) $warning = "Số từ ($word_count) cao hơn giới hạn (5000).";
-            
-            return ['success' => true, 'content' => $content, 'error' => null, 'warning' => $warning];
-        } else {
-             error_log("[$provider] Invalid API response structure: " . $response_body);
-             return ['success' => false, 'content' => null, 'error' => 'Phản hồi API OpenAI không đúng cấu trúc.'];
-        }
-    } 
-    elseif ($provider === 'gemini') {
-          return ['success' => false, 'content' => null, 'error' => 'Chức năng gọi Gemini API chưa được triển khai.'];
+    } else {
+        curl_close($ch);
+        return ['success' => false, 'content' => null, 'error' => 'Provider AI không được hỗ trợ.'];
     }
-    
-    return ['success' => false, 'content' => null, 'error' => 'Provider AI không được hỗ trợ.'];
+
+    $response_body = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curl_error_no = curl_errno($ch);
+    $curl_error_msg = curl_error($ch);
+    curl_close($ch);
+
+    // Enhanced cURL Error Handling
+    if ($response_body === false || $curl_error_no !== 0) {
+        $error_message = "Lỗi cURL ($provider): [$curl_error_no] " . $curl_error_msg;
+         // Specific check for timeout
+        if ($curl_error_no == CURLE_OPERATION_TIMEDOUT) {
+             $error_message .= " (Yêu cầu đã hết thời gian chờ sau $curl_timeout giây)";
+        }
+        error_log($error_message);
+        return ['success' => false, 'content' => null, 'error' => $error_message];
+    }
+
+
+    $result = json_decode($response_body, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+         error_log("[$provider] Failed to decode JSON response. HTTP Code: $http_code. Response: " . substr($response_body, 0, 500));
+         return ['success' => false, 'content' => null, 'error' => "Lỗi giải mã JSON từ $provider (HTTP: $http_code)."];
+    }
+
+
+    // Unified Error Handling for both providers
+    $api_error_message = null;
+    if ($http_code !== 200) {
+        if ($provider === 'openai' && isset($result['error']['message'])) {
+            $api_error_message = $result['error']['message'];
+        } elseif ($provider === 'gemini' && isset($result['error']['message'])) {
+             $api_error_message = $result['error']['message'];
+        } else {
+            $api_error_message = "Lỗi không xác định";
+        }
+        $log_msg = "$provider API Error ($http_code): " . ($api_error_message ?? 'N/A') . " | Response: " . substr($response_body, 0, 500);
+        error_log($log_msg);
+        return ['success' => false, 'content' => null, 'error' => "Lỗi API $provider ($http_code): $api_error_message"];
+    }
+
+    // Extract content based on provider structure
+    $content = null;
+    if ($provider === 'openai' && isset($result['choices'][0]['message']['content'])) {
+        $content = $result['choices'][0]['message']['content'];
+    } elseif ($provider === 'gemini' && isset($result['candidates'][0]['content']['parts'][0]['text'])) {
+        $content = $result['candidates'][0]['content']['parts'][0]['text'];
+    }
+
+    if ($content !== null) {
+        $content = preg_replace('/^```html\s*/i', '', $content); // Clean markdown fences
+        $content = preg_replace('/\s*```$/', '', $content);
+        $content = trim($content);
+
+        // Check for empty content after cleaning
+        if (empty($content)) {
+            error_log("[$provider] API returned empty content after cleaning. Original response: " . substr($response_body, 0, 500));
+            return ['success' => false, 'content' => null, 'error' => "AI trả về nội dung rỗng."];
+        }
+
+
+        $word_count = str_word_count(strip_tags($content));
+        error_log("[$provider] Generation successful. Word count: $word_count");
+        $warning = null;
+        if ($word_count < 2000) $warning = "Số từ ($word_count) vẫn thấp hơn yêu cầu TỐI THIỂU (2000).";
+        return ['success' => true, 'content' => $content, 'error' => null, 'warning' => $warning];
+    } else {
+         error_log("[$provider] Invalid API response structure: " . substr($response_body, 0, 500));
+         return ['success' => false, 'content' => null, 'error' => "Phản hồi API $provider không đúng cấu trúc."];
+    }
 }
+
 
 // === HÀM GỌI WP API ===
-function call_wordpress_api($wp_url, $username, $app_pass, $endpoint, $method = 'GET', $data = null) { /* ... (Giữ nguyên) ... */ 
-    $api_url = rtrim($wp_url, '/') . $endpoint; $ch = curl_init(); curl_setopt($ch, CURLOPT_URL, $api_url); curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); curl_setopt($ch, CURLOPT_TIMEOUT, 60); curl_setopt($ch, CURLOPT_USERAGENT, 'SmartContentAI-Publisher'); curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC); curl_setopt($ch, CURLOPT_USERPWD, "$username:$app_pass"); curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false); if ($method === 'POST') { curl_setopt($ch, CURLOPT_POST, true); if ($data) { curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data)); curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']); } } $response_body = curl_exec($ch); $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE); $curl_error = curl_error($ch); curl_close($ch); if ($curl_error) return ['success' => false, 'http_code' => null, 'data' => null, 'error' => 'Lỗi cURL WP: ' . $curl_error]; $decoded_data = json_decode($response_body, true); $api_error_message = $decoded_data['message'] ?? ($decoded_data['code'] ?? null); if ($http_code >= 200 && $http_code < 300) return ['success' => true, 'http_code' => $http_code, 'data' => $decoded_data, 'error' => null]; else { $error_detail = $api_error_message ? " (Message: $api_error_message)" : ""; return ['success' => false, 'http_code' => $http_code, 'data' => $decoded_data, 'error' => "Lỗi API WordPress ($http_code)" . $error_detail]; }
+function call_wordpress_api($wp_url, $username, $app_pass, $endpoint, $method = 'GET', $data = null) {
+    $api_url = rtrim($wp_url, '/') . $endpoint;
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $api_url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 60); // WP API timeout
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'SmartContentAI-Publisher');
+    curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+    curl_setopt($ch, CURLOPT_USERPWD, "$username:$app_pass");
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Consider security
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false); // Consider security
+    if ($method === 'POST') {
+        curl_setopt($ch, CURLOPT_POST, true);
+        if ($data) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        }
+    }
+    $response_body = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curl_error_no = curl_errno($ch);
+    $curl_error_msg = curl_error($ch);
+    curl_close($ch);
+
+    if ($response_body === false || $curl_error_no !== 0) {
+        $error_message = "Lỗi cURL WP: [$curl_error_no] " . $curl_error_msg;
+        error_log($error_message);
+        return ['success' => false, 'http_code' => null, 'data' => null, 'error' => $error_message];
+    }
+
+    $decoded_data = json_decode($response_body, true);
+     if (json_last_error() !== JSON_ERROR_NONE) {
+         error_log("Failed to decode JSON from WP API. HTTP Code: $http_code. Response: " . substr($response_body, 0, 500));
+         return ['success' => false, 'http_code' => $http_code, 'data' => null, 'error' => "Lỗi giải mã JSON từ WP API (HTTP: $http_code)."];
+    }
+
+    $api_error_message = $decoded_data['message'] ?? ($decoded_data['code'] ?? null);
+    if ($http_code >= 200 && $http_code < 300) {
+        return ['success' => true, 'http_code' => $http_code, 'data' => $decoded_data, 'error' => null];
+    } else {
+        $error_detail = $api_error_message ? " (Message: $api_error_message)" : "";
+        error_log("WP API Error ($http_code)" . $error_detail . " | Endpoint: $endpoint");
+        return ['success' => false, 'http_code' => $http_code, 'data' => $decoded_data, 'error' => "Lỗi API WordPress ($http_code)" . $error_detail];
+    }
 }
 
+
 // --- HÀM CHÍNH XỬ LÝ YÊU CẦU ---
+$conn = null; // Khởi tạo $conn ở phạm vi ngoài cùng
 try {
+    // Tăng thời gian chạy script tối đa lên 5 phút
+    if (!ini_set('max_execution_time', 300)) {
+         error_log("Warning: Could not set max_execution_time to 300.");
+    }
+    // Cố gắng tăng memory limit (Hostinger có thể ghi đè)
+    if (!ini_set('memory_limit', '256M')) {
+         error_log("Warning: Could not set memory_limit to 256M.");
+    }
+
+
     $user_data = authenticate_user();
-    if (!$user_data) { echo json_encode(['success' => false, 'message' => 'Xác thực thất bại hoặc giấy phép không hợp lệ.']); exit(); }
+    if (!$user_data) {
+        error_log("Authentication failed or invalid license.");
+        echo json_encode(['success' => false, 'message' => 'Xác thực thất bại hoặc giấy phép không hợp lệ.']);
+        exit();
+    }
     $user_id = $user_data->id;
-    $conn = null; $action = ''; $data = []; 
-    if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action'])) $action = $_GET['action'];
-    elseif ($_SERVER['REQUEST_METHOD'] === 'POST') { $data = json_decode(file_get_contents("php://input"), true); if (isset($data['action'])) $action = $data['action']; }
+
+    $action = ''; $data = [];
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action'])) {
+        $action = $_GET['action'];
+    } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        // Đọc raw input và decode JSON
+        $raw_input = file_get_contents("php://input");
+        $data = json_decode($raw_input, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+             error_log("Invalid JSON received: " . json_last_error_msg() . " | Input: " . $raw_input);
+             throw new Exception("Dữ liệu gửi lên không phải là JSON hợp lệ.");
+        }
+        if (isset($data['action'])) {
+            $action = $data['action'];
+        } else {
+             error_log("Action not specified in POST data.");
+             throw new Exception("Hành động không được chỉ định.");
+        }
+    } else {
+        error_log("Invalid request method or action not specified.");
+        throw new Exception("Phương thức yêu cầu không hợp lệ hoặc thiếu hành động.");
+    }
+
+     error_log("User ID: $user_id | Action: $action | Data Keys: " . implode(', ', array_keys($data)));
+
+
+    // Mở kết nối CSDL chung cho các action cần thiết
+    if (in_array($action, ['get_articles', 'generate_article', 'publish_articles', 'delete_article'])) {
+        $conn = get_db_connection(); // Hàm này đã có try-catch và ném Exception nếu lỗi
+        error_log("Database connection established for action: $action");
+    }
+
 
     switch ($action) {
         case 'get_articles':
-            $conn = get_db_connection(); 
-            // Chỉ lấy các trường cần thiết cho danh sách
-            $stmt_get = $conn->prepare("SELECT id, title, word_count, status, generated_at, source_keyword, source_url, SUBSTRING(content, 1, 200) as content_excerpt FROM articles WHERE user_id = ? ORDER BY generated_at DESC"); 
-            $stmt_get->bind_param("i", $user_id); $stmt_get->execute();
-            $articles = $stmt_get->get_result()->fetch_all(MYSQLI_ASSOC);
+            $stmt_get = $conn->prepare("SELECT id, title, word_count, status, generated_at, source_keyword, source_url, SUBSTRING(content, 1, 200) as content_excerpt FROM articles WHERE user_id = ? ORDER BY generated_at DESC");
+            if (!$stmt_get) throw new Exception("Lỗi prepare get_articles: " . $conn->error);
+            $stmt_get->bind_param("i", $user_id);
+            if(!$stmt_get->execute()) throw new Exception("Lỗi execute get_articles: " . $stmt_get->error);
+            $result = $stmt_get->get_result();
+            $articles = $result->fetch_all(MYSQLI_ASSOC);
             $stmt_get->close();
             echo json_encode(['success' => true, 'articles' => $articles]);
-            break; 
+            break;
 
         case 'generate_article':
-            $conn = get_db_connection(); 
             $stmt_ai = $conn->prepare("SELECT ai_provider, gemini_api_key, gemini_model, openai_api_key, openai_model FROM user_settings WHERE user_id = ?");
-            $stmt_ai->bind_param("i", $user_id); $stmt_ai->execute();
-            $ai_settings = $stmt_ai->get_result()->fetch_assoc(); $stmt_ai->close();
-            $conn->close(); // Đóng DB sau khi lấy cài đặt
-            
-            if (!$ai_settings) { echo json_encode(['success' => false, 'message' => 'Vui lòng cấu hình AI trong Cài đặt.']); exit(); }
-            
-            $api_key = null; $model = null; $provider = $ai_settings['ai_provider'];
-            if ($provider === 'gemini') { $api_key = decrypt_data($ai_settings['gemini_api_key']); $model = $ai_settings['gemini_model']; } 
-            elseif ($provider === 'openai') { $api_key = decrypt_data($ai_settings['openai_api_key']); $model = $ai_settings['openai_model']; }
-            if (!$api_key) { echo json_encode(['success' => false, 'message' => "Lỗi giải mã $provider API Key."]); exit(); }
+            if (!$stmt_ai) throw new Exception("Lỗi prepare get AI settings: " . $conn->error);
+            $stmt_ai->bind_param("i", $user_id);
+            if(!$stmt_ai->execute()) throw new Exception("Lỗi execute get AI settings: " . $stmt_ai->error);
+            $ai_settings_result = $stmt_ai->get_result();
+            $ai_settings = $ai_settings_result->fetch_assoc();
+            $stmt_ai->close();
 
-            $mode = $data['mode'] ?? 'keyword'; 
-            $keywords = $data['keywords'] ?? []; 
+
+            if (!$ai_settings) { echo json_encode(['success' => false, 'message' => 'Vui lòng cấu hình AI trong Cài đặt.']); exit(); }
+
+            $api_key = null; $model = null; $provider = $ai_settings['ai_provider'];
+            if ($provider === 'gemini') { $api_key = decrypt_data($ai_settings['gemini_api_key']); $model = $ai_settings['gemini_model']; }
+            elseif ($provider === 'openai') { $api_key = decrypt_data($ai_settings['openai_api_key']); $model = $ai_settings['openai_model']; }
+
+            if (!$api_key) { echo json_encode(['success' => false, 'message' => "Lỗi giải mã hoặc thiếu $provider API Key."]); exit(); }
+            if (!$model) { echo json_encode(['success' => false, 'message' => "Chưa chọn Model cho $provider trong Cài đặt."]); exit(); }
+
+
+            $mode = $data['mode'] ?? 'keyword';
+            $keywords = $data['keywords'] ?? [];
+             // Ensure keywords is always an array
+            if (!is_array($keywords)) {
+                 error_log("Warning: 'keywords' data is not an array, attempting to use as single keyword.");
+                 $keywords = [$keywords]; // Treat as a single keyword if not an array
+            }
+
             $url = $data['url'] ?? null;
-            $custom_prompt_addon = $data['custom_prompt'] ?? null; 
-            
-            $results = []; 
+            $custom_prompt_addon = $data['custom_prompt'] ?? null;
+
+            $results = [];
 
             if ($mode === 'keyword' || $mode === 'bulk') {
                  if (empty($keywords)) { echo json_encode(['success' => false, 'message' => 'Thiếu từ khóa.']); exit(); }
+
                  foreach ($keywords as $keyword) {
-                    $keyword = trim($keyword); if (empty($keyword)) continue;
-                    
-                    // === PROMPT NỘI DUNG (CẢI TIẾN) ===
+                    $keyword = trim((string)$keyword); // Ensure it's a string and trim
+                    if (empty($keyword)) {
+                         error_log("Skipping empty keyword in bulk mode.");
+                         continue;
+                    }
+
                     $prompt = "Yêu cầu: Viết một bài viết chuẩn SEO, sâu sắc, độc đáo về chủ đề: \"$keyword\".\n"
-                            . "Độ dài: Bài viết BẮT BUỘC phải dài từ 2500 đến 5000 từ.\n"
+                            . "Độ dài: Bài viết BẮT BUỘC phải có **TỐI THIỂU 2000 từ**. Hãy viết càng chi tiết và sâu sắc càng tốt, không giới hạn độ dài tối đa.\n"
                             . "Cấu trúc: Sử dụng các thẻ H2, H3, danh sách (ul, ol, li), in đậm (strong) một cách hợp lý. Bắt đầu bằng thẻ H2 đầu tiên.\n"
                             . "Nội dung: Cung cấp thông tin chi tiết, hữu ích, có thể bao gồm ví dụ, phân tích.\n"
                             . "Định dạng: Chỉ trả về nội dung HTML. KHÔNG dùng Markdown. KHÔNG bao gồm thẻ <html>, <head>, <body>, H1.\n";
-                    if ($custom_prompt_addon) $prompt .= "\nYêu cầu bổ sung từ người dùng: " . $custom_prompt_addon;
-                    
-                    $ai_result = call_ai_api($provider, $api_key, $model, $prompt); 
-                    
-                    $article_id = null; $conn_save = null; 
+                    if (!empty($custom_prompt_addon)) {
+                        $prompt .= "\nYêu cầu bổ sung từ người dùng: " . $custom_prompt_addon;
+                    }
+
+
+                    $ai_result = call_ai_api($provider, $api_key, $model, $prompt);
+
+                    $article_id = null;
+                    $current_result = ['id' => null, 'source_keyword' => $keyword]; // Store result temporarily
+
                     try {
-                        $conn_save = get_db_connection(); 
+                        // Re-check connection before database operation
+                        if (!$conn instanceof mysqli || !$conn->ping()) {
+                            error_log("Connection lost before saving article for '$keyword'. Attempting reconnect...");
+                            $conn = get_db_connection(); // Throws exception if fails
+                            error_log("Reconnection successful for '$keyword'.");
+                        }
+
                         if ($ai_result && $ai_result['success']) {
                             $article_content = $ai_result['content'];
-                            
-                            // === PROMPT TIÊU ĐỀ (CẢI TIẾN) ===
-                            $title_prompt = "Dựa vào nội dung bài viết về '$keyword' sau đây (đoạn đầu):\n\"" . mb_substr(strip_tags($article_content), 0, 500) . "...\"\n" 
+
+                             // Generate Title (check for mb_substr)
+                            $title = "Bài viết về " . $keyword; // Fallback
+                            if (function_exists('mb_substr') && !empty($article_content)) {
+                                $safe_excerpt = mb_substr(strip_tags($article_content), 0, 500);
+                                $title_prompt = "Dựa vào nội dung bài viết về '$keyword' sau đây (đoạn đầu):\n\"" . $safe_excerpt . "...\"\n"
                                           . "Hãy tạo 5 gợi ý Tiêu đề (title) SEO hấp dẫn (khoảng 60-70 ký tự).\n"
                                           . "Yêu cầu: Chỉ trả về 5 tiêu đề, mỗi tiêu đề trên một dòng, không có số thứ tự hay ký tự đặc biệt ở đầu dòng.";
-                            $title_result = call_ai_api($provider, $api_key, $model, $title_prompt); 
-                            $title = "Bài viết về " . $keyword; 
-                            if($title_result && $title_result['success']){ 
-                                 $titles = explode("\n", trim($title_result['content']));
-                                 // Lọc bỏ dòng trống và chọn dòng đầu tiên
-                                 $valid_titles = array_filter(array_map('trim', $titles));
-                                 $title = reset($valid_titles) ?: $title; // Lấy title đầu tiên hoặc fallback
+                                try {
+                                    $title_result = call_ai_api($provider, $api_key, $model, $title_prompt);
+                                    if($title_result && $title_result['success'] && !empty($title_result['content'])){
+                                         $titles = explode("\n", trim($title_result['content']));
+                                         $valid_titles = array_filter(array_map('trim', $titles));
+                                         if (!empty($valid_titles)) {
+                                             $title = reset($valid_titles); // Use the first valid title
+                                         }
+                                    } else {
+                                         error_log("Failed to generate title for '$keyword'. AI Error: " . ($title_result['error'] ?? 'Unknown'));
+                                    }
+                                } catch (Exception $title_e) {
+                                     error_log("Exception during title generation for '$keyword': " . $title_e->getMessage());
+                                }
+                            } else {
+                                 error_log("mb_substr not available or empty content, using fallback title for '$keyword'.");
                             }
-                            
+
+
                             $word_count = str_word_count(strip_tags($article_content));
                             $status = 'Generated';
-                            
-                            $stmt_save = $conn_save->prepare("INSERT INTO articles (user_id, title, content, source_keyword, word_count, status) VALUES (?, ?, ?, ?, ?, ?)");
+
+                            $stmt_save = $conn->prepare("INSERT INTO articles (user_id, title, content, source_keyword, word_count, status) VALUES (?, ?, ?, ?, ?, ?)");
+                            if (!$stmt_save) throw new Exception("Lỗi prepare INSERT: " . $conn->error);
                             $stmt_save->bind_param("isssis", $user_id, $title, $article_content, $keyword, $word_count, $status);
-                            $stmt_save->execute(); $article_id = $conn_save->insert_id; $stmt_save->close();
-                            $results[] = ['id' => $article_id, 'title' => $title, 'word_count' => $word_count, 'status' => $status, 'source_keyword' => $keyword, 'error' => null, 'warning' => $ai_result['warning'] ?? null];
+                            if(!$stmt_save->execute()) throw new Exception("Lỗi execute INSERT: " . $stmt_save->error);
+                            $article_id = $conn->insert_id;
+                            $stmt_save->close();
+
+                            $current_result['id'] = $article_id;
+                            $current_result['title'] = $title;
+                            $current_result['word_count'] = $word_count;
+                            $current_result['status'] = $status;
+                            $current_result['error'] = null;
+                            $current_result['warning'] = $ai_result['warning'] ?? null;
+
+
                         } else {
                              $error_msg = $ai_result['error'] ?? 'Lỗi AI không xác định.';
                              $title = "Lỗi tạo bài: " . $keyword;
-                             $stmt_save = $conn_save->prepare("INSERT INTO articles (user_id, title, content, source_keyword, status) VALUES (?, ?, ?, ?, 'Error')");
-                             $stmt_save->bind_param("isss", $user_id, $title, $error_msg, $keyword);
-                             $stmt_save->execute(); $article_id = $conn_save->insert_id; $stmt_save->close();
-                             $results[] = ['id' => $article_id, 'title' => $title, 'status' => 'Error', 'source_keyword' => $keyword, 'error' => $error_msg];
+                             $status = 'Error';
+
+                            $stmt_save = $conn->prepare("INSERT INTO articles (user_id, title, content, source_keyword, status) VALUES (?, ?, ?, ?, ?)");
+                            if (!$stmt_save) throw new Exception("Lỗi prepare INSERT (Error Case): " . $conn->error);
+                            // Correct types: i (user_id), s (title), s (content/error_msg), s (source_keyword), s (status)
+                            $stmt_save->bind_param("issss", $user_id, $title, $error_msg, $keyword, $status); // Bind status
+                             if(!$stmt_save->execute()) throw new Exception("Lỗi execute INSERT (Error Case): " . $stmt_save->error);
+                             $article_id = $conn->insert_id;
+                             $stmt_save->close();
+
+                             $current_result['id'] = $article_id;
+                             $current_result['title'] = $title;
+                             $current_result['status'] = $status;
+                             $current_result['error'] = $error_msg;
+
                         }
                     } catch (Exception $e) {
-                         $results[] = ['id' => null, 'source_keyword' => $keyword, 'error' => 'Lỗi CSDL khi lưu: ' . $e->getMessage()];
-                    } finally {
-                        if ($conn_save && $conn_save->ping()) { $conn_save->close(); }
+                         error_log("Database Exception during article save for '$keyword': " . $e->getMessage());
+                         $current_result['error'] = 'Lỗi CSDL khi lưu: ' . $e->getMessage();
+                         // Attempt to keep $conn open or reconnect if necessary
+                         if (!$conn instanceof mysqli || !$conn->ping()) {
+                              error_log("DB connection lost after exception for '$keyword', attempting reconnect for next iteration...");
+                              try { $conn = get_db_connection(); } catch (Exception $recon_e) {
+                                   error_log("FATAL: Reconnect failed after DB exception: " . $recon_e->getMessage());
+                                   // If reconnect fails, we probably can't continue the loop reliably.
+                                   $results[] = $current_result; // Add the current error result
+                                   // Optionally: break the loop here? Depends on desired behavior.
+                                   // For now, let it try the next iteration.
+                              }
+                         }
                     }
-                    if(count($keywords) > 1) { sleep(3); }
+                    $results[] = $current_result; // Add result to the main array
+
+                    // Pause between requests in bulk mode
+                    if (count($keywords) > 1) {
+                         sleep(rand(2, 4)); // Random sleep between 2-4 seconds
+                    }
                  } // End foreach
             } elseif ($mode === 'url') {
-                 // ... (Triển khai mode URL tương tự, dùng prompt cải tiến) ...
-                 $results[] = ['error' => 'Chế độ URL chưa được triển khai đầy đủ.']; 
+                 // Placeholder for URL mode
+                 error_log("URL rewrite mode is not fully implemented.");
+                 $results[] = ['id' => null, 'source_url' => $url, 'status' => 'Error', 'error' => 'Chế độ URL chưa được triển khai đầy đủ.'];
             } else {
+                 error_log("Invalid mode specified: $mode");
                  echo json_encode(['success' => false, 'message' => 'Chế độ không hợp lệ.']); exit();
             }
             echo json_encode(['success' => true, 'articles' => $results]);
-             break; 
+             break;
 
         case 'publish_articles':
-            $article_ids = $data['article_ids'] ?? [];
-            if (empty($article_ids)) { echo json_encode(['success' => false, 'message' => 'Vui lòng chọn bài viết để đăng.']); exit(); }
-            
-            $conn = get_db_connection(); 
-            $stmt_wp = $conn->prepare("SELECT site_url, wp_username, wp_application_password FROM wordpress_sites WHERE user_id = ?");
-            $stmt_wp->bind_param("i", $user_id); $stmt_wp->execute();
-            $wp_site = $stmt_wp->get_result()->fetch_assoc(); $stmt_wp->close();
-            if (!$wp_site) { $conn->close(); echo json_encode(['success' => false, 'message' => 'Chưa cấu hình kết nối WordPress trong Cài đặt.']); exit(); }
+             $article_ids = $data['article_ids'] ?? [];
+             if (!is_array($article_ids) || empty($article_ids)) {
+                 echo json_encode(['success' => false, 'message' => 'Vui lòng chọn bài viết (dữ liệu ID không hợp lệ).']); exit();
+             }
+
+            // $conn is already open
+            $stmt_wp = $conn->prepare("SELECT site_url, wp_username, wp_application_password FROM wordpress_sites WHERE user_id = ? LIMIT 1"); // Added LIMIT 1
+            if (!$stmt_wp) throw new Exception("Lỗi prepare SELECT WP Site: " . $conn->error);
+            $stmt_wp->bind_param("i", $user_id);
+            if(!$stmt_wp->execute()) throw new Exception("Lỗi execute SELECT WP Site: " . $stmt_wp->error);
+            $wp_site_result = $stmt_wp->get_result();
+            $wp_site = $wp_site_result->fetch_assoc();
+            $stmt_wp->close();
+
+            if (!$wp_site) { echo json_encode(['success' => false, 'message' => 'Chưa cấu hình kết nối WordPress trong Cài đặt.']); exit(); }
+
             $wp_pass = decrypt_data($wp_site['wp_application_password']);
-            if (!$wp_pass) { $conn->close(); echo json_encode(['success' => false, 'message' => 'Lỗi giải mã Mật khẩu ứng dụng WP.']); exit(); }
+            if (!$wp_pass) { echo json_encode(['success' => false, 'message' => 'Lỗi giải mã Mật khẩu ứng dụng WP.']); exit(); }
 
             $publish_results = [];
             foreach ($article_ids as $id) {
+                 if (!is_numeric($id)) {
+                     error_log("Invalid article ID in publish list: " . print_r($id, true));
+                     $publish_results[] = ['id' => $id, 'success' => false, 'error' => 'ID bài viết không hợp lệ.'];
+                     continue;
+                 }
                 $id = intval($id);
-                $stmt_art = $conn->prepare("SELECT title, content FROM articles WHERE id = ? AND user_id = ? AND status = 'Generated'");
-                $stmt_art->bind_param("ii", $id, $user_id); $stmt_art->execute();
-                $article = $stmt_art->get_result()->fetch_assoc(); $stmt_art->close();
-                if (!$article) { $publish_results[] = ['id' => $id, 'success' => false, 'error' => 'Không tìm thấy bài viết hoặc bài viết không ở trạng thái "Generated".']; continue; }
+                $article = null; // Reset article data for each loop
 
-                $conn->close(); // ĐÓNG TRƯỚC KHI GỌI API WP
+                try {
+                    // Check DB connection
+                    if (!$conn instanceof mysqli || !$conn->ping()) {
+                        error_log("Connection lost before getting article $id for publishing.");
+                        $conn = get_db_connection(); // Attempt reconnect
+                        error_log("Reconnection attempt successful for publishing loop.");
+                    }
 
-                // === DỮ LIỆU ĐĂNG WP (CẢI TIẾN) ===
-                $post_data = [ 
-                    'title'   => $article['title'],    // Gửi title riêng
-                    'content' => $article['content'],  // Gửi content HTML
-                    'status'  => 'publish'             // Đăng ngay
-                    // 'date' => 'YYYY-MM-DDTHH:MM:SS' // Thêm cái này để lên lịch
-                ];
-                $wp_result = call_wordpress_api($wp_site['site_url'], $wp_site['wp_username'], $wp_pass, '/wp-json/wp/v2/posts', 'POST', $post_data);
+                    $stmt_art = $conn->prepare("SELECT title, content FROM articles WHERE id = ? AND user_id = ? AND status = 'Generated'");
+                    if (!$stmt_art) throw new Exception("Lỗi prepare SELECT Article $id: " . $conn->error);
+                    $stmt_art->bind_param("ii", $id, $user_id);
+                    if(!$stmt_art->execute()) throw new Exception("Lỗi execute SELECT Article $id: " . $stmt_art->error);
+                    $article_result = $stmt_art->get_result();
+                    $article = $article_result->fetch_assoc();
+                    $stmt_art->close();
 
-                $conn = get_db_connection(); // MỞ LẠI KẾT NỐI ĐỂ XÓA/CẬP NHẬT
-                if ($wp_result['success']) {
-                     $stmt_del = $conn->prepare("DELETE FROM articles WHERE id = ? AND user_id = ?");
-                     $stmt_del->bind_param("ii", $id, $user_id);
-                     $stmt_del->execute(); $stmt_del->close();
-                     $publish_results[] = ['id' => $id, 'success' => true, 'wp_id' => $wp_result['data']['id'] ?? null, 'link' => $wp_result['data']['link'] ?? null];
-                } else {
-                     $error_content = $wp_result['error'] ?? 'Lỗi không xác định khi đăng bài.';
-                     $publish_results[] = ['id' => $id, 'success' => false, 'error' => $error_content];
-                     // Cập nhật lỗi vào DB
-                     $stmt_err = $conn->prepare("UPDATE articles SET status = 'Error', content = ? WHERE id = ? AND user_id = ?"); 
-                     $stmt_err->bind_param("sii", $error_content, $id, $user_id); 
-                     $stmt_err->execute(); $stmt_err->close();
+                    if (!$article) {
+                        $publish_results[] = ['id' => $id, 'success' => false, 'error' => 'Không tìm thấy bài viết hoặc bài viết không ở trạng thái "Generated".'];
+                        continue;
+                    }
+
+                    // Call WordPress API
+                    $post_data = [ 'title' => $article['title'], 'content' => $article['content'], 'status' => 'publish' ];
+                    $wp_result = call_wordpress_api($wp_site['site_url'], $wp_site['wp_username'], $wp_pass, '/wp-json/wp/v2/posts', 'POST', $post_data);
+
+                    // Re-check DB connection before update/delete
+                    if (!$conn instanceof mysqli || !$conn->ping()) {
+                        error_log("Connection lost after posting article $id to WP.");
+                         $conn = get_db_connection(); // Attempt reconnect
+                        error_log("Reconnection successful after WP post for $id.");
+                    }
+
+                    if ($wp_result['success']) {
+                        // Delete article from local DB
+                        $stmt_del = $conn->prepare("DELETE FROM articles WHERE id = ? AND user_id = ?");
+                         if (!$stmt_del) throw new Exception("Lỗi prepare DELETE Article $id: " . $conn->error);
+                        $stmt_del->bind_param("ii", $id, $user_id);
+                        if(!$stmt_del->execute()) throw new Exception("Lỗi execute DELETE Article $id: " . $stmt_del->error);
+                        $stmt_del->close();
+                        $publish_results[] = ['id' => $id, 'success' => true, 'wp_id' => $wp_result['data']['id'] ?? null, 'link' => $wp_result['data']['link'] ?? null];
+                    } else {
+                        // Update article status to Error
+                        $error_content = $wp_result['error'] ?? 'Lỗi không xác định khi đăng bài.';
+                        $publish_results[] = ['id' => $id, 'success' => false, 'error' => $error_content];
+
+                        $stmt_err = $conn->prepare("UPDATE articles SET status = 'Error', content = ? WHERE id = ? AND user_id = ?");
+                         if (!$stmt_err) throw new Exception("Lỗi prepare UPDATE status to Error for ID $id: " . $conn->error);
+                        // Truncate error message if it's too long for the content column
+                        $truncated_error = mb_substr($error_content, 0, 65535, 'UTF-8'); // Assuming content is TEXT (64KB)
+                        $stmt_err->bind_param("sii", $truncated_error, $id, $user_id);
+                        if(!$stmt_err->execute()) throw new Exception("Lỗi execute UPDATE status to Error for ID $id: " . $stmt_err->error);
+                        $stmt_err->close();
+                    }
+
+                } catch (Exception $e) {
+                     error_log("Exception during publishing article $id: " . $e->getMessage());
+                     $publish_results[] = ['id' => $id, 'success' => false, 'error' => 'Lỗi hệ thống khi đăng bài: ' . $e->getMessage()];
+                     // Try to ensure connection is stable for the next iteration
+                     if (!$conn instanceof mysqli || !$conn->ping()) {
+                          error_log("Attempting reconnect after exception in publish loop for article $id...");
+                          try { $conn = get_db_connection(); } catch (Exception $recon_e) {
+                              error_log("FATAL: Reconnect failed within publish loop exception handler: " . $recon_e->getMessage());
+                              // Exit if reconnect fails here, as subsequent operations will likely fail.
+                              echo json_encode(['success' => false, 'message' => 'Mất kết nối CSDL nghiêm trọng khi đang đăng bài.', 'results' => $publish_results]);
+                              exit();
+                          }
+                     }
                 }
-                // $conn->close(); // Đóng ở cuối vòng lặp (hoặc cuối case)
-                sleep(1); 
+
+
+                sleep(rand(1, 2)); // Pause between posts
             } // End foreach
             echo json_encode(['success' => true, 'results' => $publish_results]);
-            break; 
+            break;
 
         case 'delete_article':
-            $id = intval($data['id'] ?? 0); 
-            if (!$id) { echo json_encode(['success' => false, 'message' => 'Thiếu ID bài viết.']); exit(); }
-            $conn = get_db_connection(); 
+            $id = $data['id'] ?? null;
+             if (!is_numeric($id)) {
+                 echo json_encode(['success' => false, 'message' => 'Thiếu hoặc ID bài viết không hợp lệ.']); exit();
+             }
+            $id = intval($id);
+            // $conn is open
             $stmt_del = $conn->prepare("DELETE FROM articles WHERE id = ? AND user_id = ?");
-            $stmt_del->bind_param("ii", $id, $user_id); $stmt_del->execute(); $deleted = $stmt_del->affected_rows > 0; $stmt_del->close(); 
-            echo json_encode(['success' => $deleted, 'message' => $deleted ? 'Đã xóa.' : 'Xóa thất bại.']);
-            break; 
+            if (!$stmt_del) throw new Exception("Lỗi prepare DELETE article: " . $conn->error);
+            $stmt_del->bind_param("ii", $id, $user_id);
+            if(!$stmt_del->execute()) throw new Exception("Lỗi execute DELETE article: " . $stmt_del->error);
+            $deleted = $stmt_del->affected_rows > 0;
+            $stmt_del->close();
+            echo json_encode(['success' => $deleted, 'message' => $deleted ? 'Đã xóa.' : 'Xóa thất bại hoặc không tìm thấy bài.');
+            break;
         default:
+             error_log("Invalid action received: $action");
             echo json_encode(['success' => false, 'message' => 'Hành động không hợp lệ.']);
-            break; 
+            break;
     }
 
-    if ($conn && $conn->ping()) { $conn->close(); }
+    // Đóng kết nối CSDL chính ở cuối script nếu nó đã được mở và còn hợp lệ
+    if ($conn instanceof mysqli && $conn->ping()) {
+        $conn->close();
+        error_log("Database connection closed cleanly at script end.");
+    }
 
 } catch (Exception $e) {
     http_response_code(500);
-    if (isset($conn) && $conn instanceof mysqli && $conn->ping()) { $conn->close(); }
-    echo json_encode(['success' => false, 'message' => 'Lỗi máy chủ nghiêm trọng: ' . $e->getMessage()]);
+    $error_message = 'Lỗi máy chủ nghiêm trọng: ' . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine();
+    error_log("Unhandled Exception: " . $error_message); // Log lỗi chi tiết vào file log
+    // Đảm bảo $conn được đóng nếu có lỗi
+    if (isset($conn) && $conn instanceof mysqli && $conn->ping()) { $conn->close(); error_log("Database connection closed in exception handler."); }
+    // Chỉ trả về thông báo lỗi chung cho client
+    echo json_encode(['success' => false, 'message' => 'Đã xảy ra lỗi máy chủ. Vui lòng thử lại sau.']);
 }
 ?>
